@@ -1,0 +1,61 @@
+const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+
+async function request(method, url, body, { raw = false } = {}) {
+    const headers = { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() };
+    let payload = body;
+    if (body && !(body instanceof FormData) && !(body instanceof Uint8Array) && !(body instanceof Blob)) {
+        headers['Content-Type'] = 'application/json';
+        payload = JSON.stringify(body);
+    }
+    if (body instanceof Uint8Array) {
+        headers['Content-Type'] = 'application/octet-stream';
+    }
+    const res = await fetch(`/api${url}`, { method, headers, body: payload });
+    if (!res.ok) {
+        let message = `${res.status} ${res.statusText}`;
+        try {
+            const data = await res.json();
+            message = data.message || message;
+        } catch {
+            // not JSON
+        }
+        throw new Error(message);
+    }
+    if (raw) {
+        return new Uint8Array(await res.arrayBuffer());
+    }
+
+    return res.status === 204 ? null : res.json();
+}
+
+export const api = {
+    files: () => request('GET', '/files'),
+    file: (id) => request('GET', `/files/${id}`),
+    upload: (file) => {
+        const form = new FormData();
+        form.append('file', file);
+        return request('POST', '/files', form);
+    },
+    update: (id, data) => request('PATCH', `/files/${id}`, data),
+    remove: (id) => request('DELETE', `/files/${id}`),
+    reanalyze: (id) => request('POST', `/files/${id}/reanalyze`),
+    raw: (id) => request('GET', `/files/${id}/raw`, null, { raw: true }),
+    versionRaw: (id, versionId) => request('GET', `/files/${id}/versions/${versionId}/raw`, null, { raw: true }),
+    checksum: (id, bytes) => request('POST', `/files/${id}/checksum`, bytes),
+    saveVersion: (id, bytes, { label, fix, changedMaps }) => {
+        const form = new FormData();
+        form.append('file', new Blob([bytes]), 'modified.bin');
+        form.append('label', label ?? '');
+        form.append('fix', fix ? '1' : '0');
+        form.append('changed_maps', JSON.stringify(changedMaps ?? []));
+        return request('POST', `/files/${id}/versions`, form);
+    },
+    removeVersion: (id, versionId) => request('DELETE', `/files/${id}/versions/${versionId}`),
+    importXdf: (id, file) => {
+        const form = new FormData();
+        form.append('file', file);
+        return request('POST', `/files/${id}/xdf`, form);
+    },
+    definitions: () => request('GET', '/definitions'),
+    removeDefinition: (id) => request('DELETE', `/definitions/${id}`),
+};

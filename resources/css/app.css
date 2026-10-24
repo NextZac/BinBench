@@ -1,9 +1,64 @@
 @import 'tailwindcss';
 
-@source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
-@source '../../storage/framework/views/*.php';
+@source '../js/**/*.vue';
+@source '../views/**/*.blade.php';
 
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+    --color-bg: #0d1117;
+    --color-panel: #151b23;
+    --color-panel-2: #1c2430;
+    --color-line: #2a3442;
+    --color-ink: #e6edf3;
+    --color-muted: #8b98a8;
+    --color-accent: #f97316;
+    --color-accent-2: #fb923c;
+    --color-ok: #22c55e;
+    --color-bad: #ef4444;
+    --color-warn: #eab308;
+}
+
+html,
+body,
+#app {
+    height: 100%;
+}
+
+body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+}
+
+.btn {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-xs font-medium text-ink transition hover:border-accent/60 hover:bg-[#232d3b] disabled:cursor-not-allowed disabled:opacity-40;
+}
+
+.btn-primary {
+    @apply border-accent bg-accent text-black hover:bg-accent-2;
+}
+
+.btn-sm {
+    @apply px-2 py-1 text-[11px];
+}
+
+.input {
+    @apply rounded-md border border-line bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent;
+}
+
+.chip {
+    @apply inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase;
+}
+
+.scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+    background: #2a3442;
+    border-radius: 4px;
 }

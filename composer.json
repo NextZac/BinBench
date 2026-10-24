@@ -1,8 +1,8 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "nextzac/binbench",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "BinBench - browser-based ECU file identification, map finding, editing and checksum correction.",
     "keywords": ["laravel", "framework"],
     "license": "MIT",
     "require": {
@@ -12,6 +12,7 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
+        "laravel/boost": "^2.10",
         "laravel/pail": "^1.2.5",
         "laravel/pao": "^1.0.6",
         "laravel/pint": "^1.27",
