@@ -58,6 +58,10 @@
                                     :class="view === v ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
                                     @click="view = v">{{ v }}</button>
                             </div>
+                            <label class="flex items-center gap-1 text-[11px] text-muted" title="What the Original / Δ / Δ% views and the 3D overlay compare against">Compare
+                                <CompareSelect v-model="referenceKey" />
+                            </label>
+                            <span v-if="ed.reference?.sw && ed.reference.sw !== ed.file.sw" class="chip bg-warn/15 text-warn" title="Different software: map addresses may not line up">SW ≠</span>
                             <button class="btn btn-sm" :disabled="!ed.changedMapIds.has(map.id)" @click="ed.resetMap(map)">Reset map</button>
                         </div>
                     </div>
@@ -189,6 +193,7 @@ import { countDiffBytes, hex } from '../lib/binary';
 import { toast, toastError } from '../lib/toast';
 import { useEditor } from '../stores/editor';
 import ChecksumBadge from '../components/ChecksumBadge.vue';
+import CompareSelect from '../components/CompareSelect.vue';
 import HexView from '../components/HexView.vue';
 import MapList from '../components/MapList.vue';
 import MapProperties from '../components/MapProperties.vue';
@@ -220,6 +225,10 @@ const newCols = ref(8);
 const liveChecksum = ref(null);
 
 const map = computed(() => ed.selected);
+const referenceKey = computed({
+    get: () => ed.reference?.key ?? 'original',
+    set: (key) => ed.setReference(key).catch(toastError),
+});
 const shownView = computed(() => (map.value?.kind === 'value' && view.value !== 'Hex' ? 'Table' : view.value));
 const ident = computed(() => ed.file?.ident ?? {});
 const checksum = computed(() => liveChecksum.value ?? ed.file?.checksums);

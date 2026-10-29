@@ -5,7 +5,7 @@
             <div class="flex overflow-hidden rounded-md border border-line">
                 <button v-for="m in viewModes" :key="m.id" class="px-2 py-1 text-[11px]"
                     :class="viewMode === m.id ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
-                    @click="viewMode = m.id">{{ m.label }}</button>
+                    :title="m.title" @click="viewMode = m.id">{{ m.label }}</button>
             </div>
             <span class="mx-1 h-5 w-px bg-line" />
             <input v-model="operand" class="input w-20 font-mono" placeholder="value" @keydown.enter.prevent="apply('set')">
@@ -22,6 +22,7 @@
             <button class="btn btn-sm" title="Smooth the selected values (Gaussian, by axis distance). The selection edge stays put. Shift-click: stronger" @click="smooth($event)">Smooth</button>
             <button class="btn btn-sm" title="Smooth only your changes against the original: keeps the stock shape, evens out steps and feathers the edges. Shift-click: stronger" @click="smoothDelta($event)">Smooth Δ</button>
             <button class="btn btn-sm" title="Restore selection from original" @click="restoreSelection">Restore</button>
+            <button v-if="ed.reference" class="btn btn-sm" :title="`Copy the selected cells from ${ed.refLabel}`" @click="copyFromReference">Copy from ref</button>
             <span class="ml-auto text-[11px] text-muted">
                 {{ selCount }} selected<span v-if="selStats"> · min {{ selStats.min }} · max {{ selStats.max }} · avg {{ selStats.avg }}</span>
             </span>
@@ -75,13 +76,17 @@ import { useEditor } from '../stores/editor';
 const props = defineProps({ map: { type: Object, required: true } });
 const ed = useEditor();
 
-const viewModes = [
+const viewModes = computed(() => [
     { id: 'value', label: 'Value' },
-    { id: 'orig', label: 'Original' },
-    { id: 'diff', label: 'Δ' },
-    { id: 'pct', label: 'Δ%' },
-];
+    { id: 'orig', label: ed.reference ? 'Ref' : 'Original', title: `Show ${ed.refLabel}` },
+    { id: 'diff', label: 'Δ', title: `Difference to ${ed.refLabel}` },
+    { id: 'pct', label: 'Δ%', title: `Difference to ${ed.refLabel} in %` },
+]);
 const viewMode = ref('value');
+// picking a reference to compare with switches straight to the difference view
+watch(() => ed.reference?.key, (key) => {
+    if (key) viewMode.value = 'diff';
+});
 const operand = ref('');
 const sel = ref({ r0: 0, c0: 0, r1: 0, c1: 0 });
 const dragging = ref(false);
@@ -94,6 +99,11 @@ const grid = computed(() => {
     return readGrid(ed.current, props.map);
 });
 const origGrid = computed(() => readGrid(ed.original, props.map));
+// what the Original / Δ views compare against (the original file unless another reference is picked)
+const refGrid = computed(() => {
+    void ed.revision;
+    return readGrid(ed.refBytes, props.map);
+});
 const xAxis = computed(() => {
     void ed.revision;
     return readAxis(ed.current, props.map.x, props.map.cols);
@@ -160,11 +170,11 @@ function heat(t) {
 
 function cellStyle(r, c, v) {
     if (viewMode.value === 'diff' || viewMode.value === 'pct') {
-        const d = v - origGrid.value[r][c];
+        const d = v - refGrid.value[r][c];
         if (d === 0) return { background: '#1a212b', color: '#6b7787' };
         return { background: d > 0 ? 'rgba(239,68,68,.55)' : 'rgba(37,99,235,.6)', color: '#fff' };
     }
-    const src = viewMode.value === 'orig' ? origGrid.value[r][c] : v;
+    const src = viewMode.value === 'orig' ? refGrid.value[r][c] : v;
     const { min, max } = range.value;
     const t = max > min ? (src - min) / (max - min) : 0.5;
     const [R, G, B] = heat(t);
@@ -173,7 +183,7 @@ function cellStyle(r, c, v) {
 
 function display(r, c, v) {
     const d = props.map.decimals ?? 2;
-    const o = origGrid.value[r][c];
+    const o = refGrid.value[r][c];
     switch (viewMode.value) {
         case 'orig': return fmt(o, d);
         case 'diff': return v === o ? '·' : (v - o > 0 ? '+' : '') + fmt(v - o, d);
@@ -184,7 +194,7 @@ function display(r, c, v) {
 
 function cellTitle(r, c) {
     const d = props.map.decimals ?? 2;
-    return `${fmt(yAxis.value[r], 2)} / ${fmt(xAxis.value[c], 2)}\nValue ${fmt(grid.value[r][c], d)}  Original ${fmt(origGrid.value[r][c], d)}`;
+    return `${fmt(yAxis.value[r], 2)} / ${fmt(xAxis.value[c], 2)}\nValue ${fmt(grid.value[r][c], d)}  Original ${fmt(origGrid.value[r][c], d)}${ed.reference ? `  ${ed.refLabel} ${fmt(refGrid.value[r][c], d)}` : ''}`;
 }
 
 function startSelect(r, c, e) {
@@ -254,6 +264,10 @@ function smoothDelta(e) {
 
 function restoreSelection() {
     mutate((v, r, c) => origGrid.value[r][c]);
+}
+
+function copyFromReference() {
+    mutate((v, r, c) => refGrid.value[r][c]);
 }
 
 async function beginEdit(r, c, initial = null) {

@@ -3,20 +3,27 @@
         <div class="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2 text-xs">
             <div class="min-w-0">
                 <div class="text-sm font-semibold">Diff &amp; review</div>
-                <div class="text-[11px] text-muted">What changed against the original file, and whether it looks safe and well made.</div>
+                <div class="text-[11px] text-muted">What changed between two files, and whether it looks safe and well made.</div>
             </div>
-            <label class="ml-auto flex items-center gap-2">Compare
-                <select v-model="source" class="input py-1">
-                    <option value="current">Current edits</option>
-                    <option v-for="v in ed.file.versions" :key="v.id" :value="v.id">{{ v.label }}</option>
-                </select>
-                with the original
-            </label>
+            <div class="ml-auto flex flex-wrap items-center gap-2">
+                <label class="flex items-center gap-2">Compare
+                    <CompareSelect v-model="target" include-current />
+                </label>
+                <button class="btn btn-sm" title="Swap the two sides" @click="swap">⇄</button>
+                <label class="flex items-center gap-2">against
+                    <CompareSelect v-model="base" include-current />
+                </label>
+            </div>
+        </div>
+        <div v-if="result?.swMismatch" class="mx-3 mt-3 rounded-md border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">
+            {{ result.target.label }} (SW {{ result.target.sw }}) and {{ result.base.label }} (SW {{ result.base.sw }}) have different software.
+            Map definitions come from this file, so changes may land in the wrong maps.
         </div>
 
         <div v-if="error" class="p-6 text-center text-xs text-bad">{{ error }}</div>
         <div v-else-if="!result" class="p-6 text-center text-xs text-muted">Comparing…</div>
-        <div v-else-if="result.review.verdict === 'none'" class="p-6 text-center text-xs text-muted">No differences to the original file.</div>
+        <div v-else-if="base === target" class="p-6 text-center text-xs text-muted">Pick two different files to compare.</div>
+        <div v-else-if="result.review.verdict === 'none'" class="p-6 text-center text-xs text-muted">No differences between {{ result.target.label }} and {{ result.base.label }}.</div>
 
         <template v-else>
             <!-- verdict -->
@@ -96,12 +103,15 @@ import { api } from '../lib/api';
 import { hex } from '../lib/binary';
 import { useEngineInputs } from '../lib/engine';
 import { useEditor } from '../stores/editor';
+import CompareSelect from './CompareSelect.vue';
 
-// versionId: compare this saved version instead of the current edits.
+// versionId: compare this saved version (instead of the current edits) against the original.
 const props = defineProps({ versionId: { type: Number, default: null } });
 const ed = useEditor();
 const { params } = useEngineInputs(ed.file.id);
-const source = ref(props.versionId ?? 'current');
+// each side: 'original', 'current', 'version:{id}' or 'file:{id}'
+const target = ref(props.versionId ? `version:${props.versionId}` : 'current');
+const base = ref('original');
 const result = ref(null);
 const error = ref(null);
 let timer = null;
@@ -131,13 +141,27 @@ function range(r) {
     return r.min === r.max ? `${f(r.min)}` : `${f(r.min)}–${f(r.max)}`;
 }
 
+function swap() {
+    [base.value, target.value] = [target.value, base.value];
+}
+
 async function compare() {
     const id = ++requestId;
+    if (base.value === target.value) {
+        result.value = null;
+        return;
+    }
     try {
-        const bytes = source.value === 'current'
-            ? (ed.dirty ? ed.current : null)
-            : await api.versionRaw(ed.file.id, source.value);
-        const res = await api.diff(ed.file.id, bytes, params());
+        // the working buffer goes in the body; unedited, "current" is just the original
+        const side = (key) => (key === 'current' ? (ed.dirty ? null : 'original') : key);
+        const bufferSide = target.value === 'current' ? 'target' : base.value === 'current' ? 'base' : null;
+        const bytes = bufferSide && ed.dirty ? ed.current : null;
+        const res = await api.diff(ed.file.id, bytes, {
+            ...params(),
+            base: side(base.value),
+            target: side(target.value),
+            buffer_side: bytes ? bufferSide : null,
+        });
         if (id !== requestId) return;
         error.value = null;
         result.value = res;
@@ -146,12 +170,15 @@ async function compare() {
     }
 }
 
-watch(source, compare);
+watch([base, target], compare);
 watch(() => props.versionId, (v) => {
-    if (v !== null) source.value = v;
+    if (v !== null) {
+        target.value = `version:${v}`;
+        base.value = 'original';
+    }
 });
 watch(() => ed.revision, () => {
-    if (source.value !== 'current') return;
+    if (target.value !== 'current' && base.value !== 'current') return;
     clearTimeout(timer);
     timer = setTimeout(compare, 800);
 });

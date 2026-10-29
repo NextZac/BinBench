@@ -14,7 +14,10 @@ export const useEditor = defineStore('editor', {
         undoStack: [],
         redoStack: [],
         revision: 0,
-        compareTo: null, // { label, bytes } for version comparison
+        // what the Original / Δ views compare against: null = the original file, else { key, label, sw, bytes }
+        reference: null,
+        // other files of the same size the user can compare with
+        compareFiles: [],
         liveChecksum: null,
     }),
 
@@ -31,6 +34,17 @@ export const useEditor = defineStore('editor', {
                 return bytesDiffer(s.original, s.current, a, b);
             }).map((m) => m.id));
         },
+        // maps whose current values differ from the picked reference (empty without one)
+        refChangedMapIds(s) {
+            void s.revision;
+            if (!s.current || !s.reference) return new Set();
+            return new Set(this.maps.filter((m) => {
+                const [a, b] = mapRange(m);
+                return bytesDiffer(s.reference.bytes, s.current, a, b);
+            }).map((m) => m.id));
+        },
+        refBytes: (s) => s.reference?.bytes ?? s.original,
+        refLabel: (s) => s.reference?.label ?? 'Original',
         dirty(s) {
             void s.revision;
             return this.changedMapIds.size > 0 || s.undoStack.length > 0;
@@ -46,6 +60,41 @@ export const useEditor = defineStore('editor', {
             this.current = raw.slice();
             const firstGood = file.maps.find((m) => m.kind === 'map' && m.confidence >= 0.7) ?? file.maps[0];
             this.selectedId = firstGood?.id ?? null;
+        },
+
+        async loadCompareFiles() {
+            const files = await api.files();
+            this.compareFiles = files.filter((f) => f.id !== this.file.id && f.size === this.file.size);
+        },
+
+        /**
+         * Raw bytes of a compare source: 'original', 'current', 'version:{id}' or 'file:{id}'.
+         */
+        async sourceBytes(key) {
+            const [kind, id] = key.split(':');
+            if (kind === 'current') return this.current;
+            if (kind === 'version') return api.versionRaw(this.file.id, id);
+            if (kind === 'file') return api.raw(id);
+            return this.original;
+        },
+
+        sourceLabel(key) {
+            const [kind, id] = key.split(':');
+            if (kind === 'current') return 'Current edits';
+            if (kind === 'version') return this.file.versions.find((v) => v.id === Number(id))?.label ?? 'Version';
+            if (kind === 'file') return this.compareFiles.find((f) => f.id === Number(id))?.name ?? 'File';
+            return 'Original';
+        },
+
+        async setReference(key) {
+            if (!key || key === 'original') {
+                this.reference = null;
+            } else {
+                const bytes = await this.sourceBytes(key);
+                const sw = key.startsWith('file:') ? this.compareFiles.find((f) => f.id === Number(key.slice(5)))?.sw : this.file.sw;
+                this.reference = { key, label: this.sourceLabel(key), sw, bytes };
+            }
+            this.revision++;
         },
 
         setFile(file) {

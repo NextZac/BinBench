@@ -24,6 +24,7 @@
                             <span class="block truncate text-[12px]" :class="ed.changedMapIds.has(m.id) ? 'font-semibold text-accent' : ''">{{ m.name }}</span>
                             <span class="block font-mono text-[10px] text-muted">{{ hex(m.address) }} · {{ m.rows }}×{{ m.cols }} · {{ m.dtype }}{{ m.be ? ' BE' : '' }}</span>
                         </span>
+                        <span v-if="ed.refChangedMapIds.has(m.id)" class="chip bg-sky-500/20 text-sky-300" :title="`Differs from ${ed.refLabel}`">≠ref</span>
                         <span v-if="ed.changedMapIds.has(m.id)" class="chip bg-accent/20 text-accent">mod</span>
                     </button>
                 </template>
@@ -42,11 +43,12 @@ const ed = useEditor();
 const query = ref('');
 const filter = ref('main');
 const collapsed = reactive({});
-const filters = [
+const filters = computed(() => [
     { id: 'main', label: 'Key maps' },
     { id: 'all', label: 'All' },
     { id: 'changed', label: 'Changed' },
-];
+    ...(ed.reference ? [{ id: 'ref', label: '≠ Ref' }] : []),
+]);
 
 const categoryOrder = ['Torque / IQ', 'Torque', 'Limiters', 'Boost', 'Injection', 'Fuel', 'Ignition', 'Airflow', 'EGR / Air', 'Rail', 'Corrections'];
 
@@ -54,6 +56,7 @@ const groups = computed(() => {
     const q = query.value.trim().toLowerCase();
     const list = ed.maps.filter((m) => {
         if (filter.value === 'changed' && !ed.changedMapIds.has(m.id)) return false;
+        if (filter.value === 'ref' && ed.reference && !ed.refChangedMapIds.has(m.id)) return false;
         if (filter.value === 'main' && !['xdf', 'user'].includes(m.source) && (m.confidence < 0.5 || m.category === 'Unidentified')) return false;
         if (!q) return true;
         return m.name.toLowerCase().includes(q) || hex(m.address).toLowerCase().includes(q.replace(/^0x/, '0x')) || m.address.toString(16).includes(q.replace(/^0x/, ''));

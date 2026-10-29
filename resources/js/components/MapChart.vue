@@ -20,7 +20,7 @@ function render() {
     if (!el.value) return;
     const m = props.map;
     const z = readGrid(ed.current, m);
-    const zo = readGrid(ed.original, m);
+    const zo = readGrid(ed.refBytes, m);
     const x = readAxis(ed.current, m.x, m.cols);
     const y = readAxis(ed.current, m.y, m.rows);
     const changed = JSON.stringify(z) !== JSON.stringify(zo);
@@ -40,7 +40,7 @@ function render() {
             contours: { z: { show: true, usecolormap: true, project: { z: false } } },
         }];
         if (changed) {
-            traces.push({ type: 'surface', x, y, z: zo, opacity: 0.35, colorscale: [[0, '#94a3b8'], [1, '#94a3b8']], showscale: false, name: 'Original' });
+            traces.push({ type: 'surface', x, y, z: zo, opacity: 0.35, colorscale: [[0, '#94a3b8'], [1, '#94a3b8']], showscale: false, name: ed.refLabel });
         }
         Plotly.react(el.value, traces, {
             ...layoutBase,
@@ -59,7 +59,7 @@ function render() {
     const series = m.cols === 1 ? [{ xs: y, ys: z.map((r) => r[0]), os: zo.map((r) => r[0]) }] : z.map((row, i) => ({ xs: x, ys: row, os: zo[i] }));
     const traces = series.flatMap((s, i) => [
         { type: 'scatter', mode: 'lines+markers', x: s.xs, y: s.ys, name: series.length > 1 ? `Row ${i}` : 'Modified', line: { color: '#f97316', width: 2 } },
-        ...(changed ? [{ type: 'scatter', mode: 'lines', x: s.xs, y: s.os, name: 'Original', line: { color: '#94a3b8', dash: 'dot' } }] : []),
+        ...(changed ? [{ type: 'scatter', mode: 'lines', x: s.xs, y: s.os, name: ed.refLabel, line: { color: '#94a3b8', dash: 'dot' } }] : []),
     ]);
     Plotly.react(el.value, traces, {
         ...layoutBase,
