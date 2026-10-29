@@ -54,6 +54,16 @@ class MapWriter
         };
     }
 
+    /**
+     * Smallest and largest raw value of an integer storage type, null for floats.
+     *
+     * @return ?array{0: int, 1: int}
+     */
+    public static function limits(string $dtype): ?array
+    {
+        return self::RANGES[$dtype] ?? null;
+    }
+
     /** The raw value the storage type actually holds after rounding and clamping. */
     public static function storable(float $raw, string $dtype): float
     {

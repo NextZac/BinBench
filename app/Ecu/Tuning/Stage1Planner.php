@@ -330,21 +330,9 @@ class Stage1Planner
         if (! $peaks) {
             return;
         }
-        $peak = min($peaks);
-
-        $short = [];
-        $fuelAxis = '/mg|mm\^?3|mm³/i';
-        foreach (MapRoles::candidates($maps, $bin, 'duration') as $map) {
-            $values = new MapValues($map, $bin);
-            $axis = preg_match($fuelAxis, (string) $map->x?->unit) ? $values->x : (preg_match($fuelAxis, (string) $map->y?->unit) ? $values->y : []);
-            if ($axis && max($axis) < $peak) {
-                $short[] = [$map->name, max($axis)];
-            }
-        }
-        if ($short) {
-            $this->warnings[] = sprintf('%s end%s at %.1f on the fuel axis, but the new fuel limit reaches %.1f. Extend the duration maps (and check the injectors) before using this.',
-                count($short) === 1 ? $short[0][0] : count($short).' injection duration maps ('.$short[0][0].', ...)',
-                count($short) === 1 ? 's' : '', min(array_column($short, 1)), $peak);
+        $warning = InjectionCheck::warning($maps, $bin, min($peaks));
+        if ($warning !== null) {
+            $this->warnings[] = $warning;
         }
     }
 
