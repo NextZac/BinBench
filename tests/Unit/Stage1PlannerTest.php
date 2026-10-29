@@ -107,7 +107,7 @@ class Stage1PlannerTest extends TestCase
         $bin = new Bin($this->synthetic->data());
         $roles = MapRoles::assign($this->maps, $bin, MapRoles::DIESEL);
 
-        $tuned = (new Stage1Planner)->apply($bin, $plan['proposals'], $roles);
+        $tuned = (new Stage1Planner)->apply($bin, $plan['proposals'], $this->maps);
 
         foreach ($plan['proposals'] as $proposal) {
             $this->assertSame($proposal['values'], array_map(fn (array $row): array => array_map(fn (float $v): float => round($v, 6), $row),
@@ -119,14 +119,14 @@ class Stage1PlannerTest extends TestCase
     public function test_warns_about_torque_limit_and_short_duration_axis(): void
     {
         $rail = [2000, 6000, 10000, 14000, 18000];
-        $this->maps[] = $this->synthetic->map('duration', 0x1200, 'Injection duration', self::IQ, 'Fuel quantity', 'mg/st', null, [[0, 400, 800, 1200]], 1.0, 'raw', 0.01);
+        $this->maps[] = $this->synthetic->map('duration', 0x1200, 'Injection duration', [0, 1500, 3000, 4500], 'Fuel quantity', 'mg/st', null, [[0, 400, 800, 1200]], 1.0, 'raw', 0.01);
         $this->maps[] = $this->synthetic->map('duration2', 0x1300, 'Injection duration #2', $rail, 'Rail pressure', 'bar', null, [[0, 1, 2, 3, 4]], 1.0, 'raw');
 
         $plan = $this->plan(new Stage1Options(maxTorque: 250));
         $warnings = implode(' ', $plan['warnings']);
 
         $this->assertStringContainsString('exceeds the 250 Nm', $warnings);
-        $this->assertStringContainsString('Injection duration ends at 60.0 mg/st', $warnings);
+        $this->assertStringContainsString('Injection duration ends at 45.0 on the fuel axis, but the new fuel limit reaches 57.5', $warnings);
         $this->assertStringNotContainsString('Injection duration #2', $warnings);
     }
 

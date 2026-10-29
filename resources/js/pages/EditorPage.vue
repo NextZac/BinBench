@@ -44,6 +44,7 @@
             <section class="flex min-w-0 flex-1 flex-col">
                 <DynoPanel v-if="mainView === 'dyno'" />
                 <Stage1Panel v-else-if="mainView === 'stage1'" />
+                <DiffPanel v-else-if="mainView === 'diff'" :version-id="diffVersion" />
                 <template v-else-if="map">
                     <div class="flex items-center gap-3 border-b border-line px-3 py-2">
                         <div class="min-w-0">
@@ -136,6 +137,7 @@
                             <div class="mt-2 flex gap-1">
                                 <a class="btn btn-sm" :href="`/api/files/${ed.file.id}/versions/${v.id}/download`">Download</a>
                                 <button class="btn btn-sm" @click="openVersion(v)">Load into editor</button>
+                                <button class="btn btn-sm" title="Diff and review against the original" @click="reviewVersion(v)">Review</button>
                                 <button class="btn btn-sm ml-auto" @click="removeVersion(v)">Delete</button>
                             </div>
                         </div>
@@ -195,14 +197,16 @@ import MapTable from '../components/MapTable.vue';
 const MapChart = defineAsyncComponent(() => import('../components/MapChart.vue'));
 const DynoPanel = defineAsyncComponent(() => import('../components/DynoPanel.vue'));
 const Stage1Panel = defineAsyncComponent(() => import('../components/Stage1Panel.vue'));
+const DiffPanel = defineAsyncComponent(() => import('../components/DiffPanel.vue'));
 
 const props = defineProps({ id: { type: String, required: true } });
 const ed = useEditor();
 const loading = ref(true);
 const views = ['Table', 'Split', '3D', 'Hex'];
 const view = ref('Split');
-const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }];
+const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }, { id: 'diff', label: 'Diff' }];
 const mainView = ref('maps');
+const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
 const side = ref('ECU');
 const saveDialog = ref(false);
@@ -303,6 +307,11 @@ async function openVersion(v) {
     } catch (e) {
         toastError(e);
     }
+}
+
+function reviewVersion(v) {
+    diffVersion.value = v.id;
+    mainView.value = 'diff';
 }
 
 async function removeVersion(v) {

@@ -115,10 +115,47 @@ class MapValues
         return $this->rpmOnX() ? $this->map->y : $this->map->x;
     }
 
-    /** Bosch dumps put engine speed on the rows unless the X axis says otherwise. */
+    /**
+     * Which axis is engine speed: by axis name/unit first, then by its values; Bosch dumps put
+     * engine speed on the rows when nothing says otherwise.
+     */
     public function rpmOnX(): bool
     {
-        return self::isRpmAxis($this->map->x) && ! self::isRpmAxis($this->map->y);
+        $xNamed = self::isRpmAxis($this->map->x);
+        $yNamed = self::isRpmAxis($this->map->y);
+        if ($xNamed !== $yNamed) {
+            return $xNamed;
+        }
+        if (! $xNamed && $this->map->rows > 1 && $this->map->cols > 1) {
+            return self::looksLikeRpm($this->x) && ! self::looksLikeRpm($this->y);
+        }
+
+        return false;
+    }
+
+    /** True when an axis is, or looks like, engine speed. Curves only have the X axis to offer. */
+    public function hasRpmAxis(): bool
+    {
+        if ($this->map->rows === 1) {
+            return self::isRpmAxis($this->map->x) || self::looksLikeRpm($this->x);
+        }
+        if ($this->map->cols === 1) {
+            return self::isRpmAxis($this->map->y) || self::looksLikeRpm($this->y);
+        }
+
+        return self::isRpmAxis($this->map->x) || self::isRpmAxis($this->map->y)
+            || self::looksLikeRpm($this->x) || self::looksLikeRpm($this->y);
+    }
+
+    /**
+     * Engine speed breakpoints: a few ascending values from idle-ish up to a diesel/petrol rev range.
+     *
+     * @param  float[]  $values
+     */
+    public static function looksLikeRpm(array $values): bool
+    {
+        return count($values) >= 3 && min($values) >= 0 && min($values) <= 2000
+            && max($values) >= 2500 && max($values) <= 9000;
     }
 
     public static function isRpmAxis(?Axis $axis): bool

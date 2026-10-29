@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\EcuFile;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
@@ -58,6 +59,49 @@ class TuningApiTest extends TestCase
         $this->assertStringContainsString('"software": "1037351761"', $prompt);
         $this->assertStringContainsString('"map": "Boost pressure target"', $prompt);
         $this->assertStringNotContainsString('"values"', $prompt);
+    }
+
+    public function test_role_overrides_change_the_proposal(): void
+    {
+        $roles = $this->postJson(route('files.stage1', $this->fileId))->json('roles');
+        $this->assertNotNull($roles['smoke']['id']);
+
+        $response = $this->postJson(route('files.stage1', [$this->fileId, 'roles' => ['smoke' => 'none']]));
+
+        $response->assertOk()
+            ->assertJsonPath('roles.smoke.id', null)
+            ->assertJsonPath('roles.smoke.overridden', true);
+        $this->assertNotContains('smoke', array_column($response->json('proposals'), 'role'));
+        $this->assertStringContainsString('No smoke limiter found', implode(' ', $response->json('warnings')));
+    }
+
+    public function test_diff_reviews_a_modified_buffer(): void
+    {
+        $original = EcuFile::find($this->fileId)->bin()->data;
+        // torque limiter (rpm x patm map at 0x61000) +40 %: the driver's wish then caps it
+        $limiter = 0x61000 + (2 + 8 + 5) * 2;
+        $raised = $original;
+        for ($i = 0; $i < 40; $i++) {
+            $raised = substr_replace($raised, pack('v', (int) (unpack('v', substr($original, $limiter + $i * 2, 2))[1] * 1.4)), $limiter + $i * 2, 2);
+        }
+
+        $response = $this->call('POST', route('files.diff', $this->fileId), [], [], [],
+            ['CONTENT_TYPE' => 'application/octet-stream', 'HTTP_ACCEPT' => 'application/json'], $raised);
+
+        $response->assertOk()
+            ->assertJsonPath('maps.0.name', 'Torque limiter (atm. pressure)')
+            ->assertJsonPath('maps.0.changedCells', 40)
+            ->assertJsonPath('unmapped', [])
+            ->assertJsonPath('review.verdict', 'check');
+        $this->assertContains("Driver's wish caps the raised torque limit", array_column($response->json('review.findings'), 'title'));
+    }
+
+    public function test_diff_without_changes_has_no_verdict(): void
+    {
+        $this->postJson(route('files.diff', $this->fileId))
+            ->assertOk()
+            ->assertJsonPath('changedBytes', 0)
+            ->assertJsonPath('review.verdict', 'none');
     }
 
     public function test_rejects_aggressive_options(): void

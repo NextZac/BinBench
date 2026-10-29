@@ -9,18 +9,22 @@
         </div>
 
         <div v-if="error" class="grid flex-1 place-items-center p-6 text-center text-xs text-bad">{{ error }}</div>
-        <div v-else-if="result && !result.available" class="grid flex-1 place-items-center p-6 text-center text-xs text-muted">{{ result.reason }}</div>
+        <div v-else-if="result && !result.available" class="space-y-3 p-6 text-xs">
+            <div class="text-center text-muted">{{ result.reason }}</div>
+            <RolePicker :roles="result.roles" :choices="engine.roles" />
+        </div>
         <div v-else-if="!result" class="grid flex-1 place-items-center text-xs text-muted">Calculating…</div>
 
         <template v-else>
             <DynoChart :result="result" />
 
             <!-- maps used + notes -->
-            <div class="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2 text-[11px]">
-                <span class="text-muted">Maps used:</span>
-                <button v-for="(m, role) in result.maps" :key="role" class="btn btn-sm" @click="ed.selectedId = m.id">{{ m.name }}</button>
-                <span v-if="result.calibrated" class="chip ml-auto bg-ok/15 text-ok">Calibrated to stock power</span>
-                <span v-else class="chip ml-auto bg-panel-2 text-muted">Uncalibrated</span>
+            <div class="border-t border-line px-3 py-2">
+                <div class="mb-1.5 flex justify-end">
+                    <span v-if="result.calibrated" class="chip bg-ok/15 text-ok">Calibrated to stock power</span>
+                    <span v-else class="chip bg-panel-2 text-muted">Uncalibrated</span>
+                </div>
+                <RolePicker :roles="result.roles" :choices="engine.roles" />
             </div>
             <div v-for="n in result.notes" :key="n" class="mx-3 mb-2 rounded border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">{{ n }}</div>
         </template>
@@ -34,6 +38,7 @@ import { useEngineInputs } from '../lib/engine';
 import { useEditor } from '../stores/editor';
 import DynoChart from './DynoChart.vue';
 import EngineInputs from './EngineInputs.vue';
+import RolePicker from './RolePicker.vue';
 
 const ed = useEditor();
 const result = ref(null);

@@ -17,6 +17,17 @@ use App\Ecu\Maps\MapWriter;
  */
 class Stage1Planner
 {
+    private const ROLE_LABELS = [
+        'wish' => "driver's wish",
+        'torqueLimit' => 'torque limiter',
+        'fullLoadLimit' => 'full-load fuel limit',
+        'smoke' => 'smoke limiter',
+        'boost' => 'boost pressure target',
+        'boostLimit' => 'boost pressure limiter',
+        'ldrxn' => 'maximum load (LDRXN)',
+        'kfmirl' => 'torque to load map (KFMIRL)',
+    ];
+
     /** Headroom kept between the boost target and the boost limiter, mbar. */
     private const BOOST_LIMIT_MARGIN = 100.0;
 
@@ -27,13 +38,17 @@ class Stage1Planner
      * @param  MapDef[]  $maps
      * @param  Bin  $original  the unmodified file, used as the dyno baseline
      * @param  Bin  $base  the buffer the proposal builds on (the editor's current state)
+     * @param  array<string, string>  $overrides  role => map id chosen by the user, or MapRoles::NONE
      * @return array<string, mixed>
      */
-    public function plan(array $maps, EngineSpec $spec, Bin $original, Bin $base, Stage1Options $options): array
+    public function plan(array $maps, EngineSpec $spec, Bin $original, Bin $base, Stage1Options $options, array $overrides = []): array
     {
         $this->warnings = [];
-        $roles = MapRoles::assign($maps, $base, $spec->diesel ? MapRoles::DIESEL : MapRoles::PETROL);
-        $values = array_map(fn (MapDef $m): MapValues => new MapValues($m, $base), $roles);
+        $wanted = $spec->diesel ? MapRoles::DIESEL : MapRoles::PETROL;
+        $groups = [];
+        foreach ($wanted as $role) {
+            $groups[$role] = array_map(fn (MapDef $m): MapValues => new MapValues($m, $base), MapRoles::group($maps, $base, $role, $overrides));
+        }
 
         $result = [
             'available' => false,
@@ -42,24 +57,36 @@ class Stage1Planner
             'proposals' => [],
             'warnings' => [],
             'notes' => $this->notes($spec),
+            'roles' => MapRoles::describe($maps, $base, $wanted, $overrides),
             'dyno' => null,
         ];
 
-        $proposals = $spec->diesel ? $this->diesel($values, $options) : $this->petrol($values, $options);
+        $proposals = $spec->diesel ? $this->diesel($groups, $options) : $this->petrol($groups, $options);
+        // a map matching two roles is changed once, by the first rule
+        $proposals = array_values(array_intersect_key($proposals, array_unique(array_column($proposals, 'mapId'))));
+        foreach ($proposals as $p) {
+            if ($p['changedCells'] === 0) {
+                $this->warnings[] = sprintf('%s was picked as the %s but no cell would change. Check its axes, or pick another map for this role.', $p['name'], self::ROLE_LABELS[$p['role']]);
+            }
+        }
         $proposals = array_values(array_filter($proposals, fn (array $p): bool => $p['changedCells'] > 0));
         if (! $proposals) {
             $result['reason'] = $spec->diesel
                 ? "No torque limiter or driver's wish map was found, so there is nothing to base a Stage 1 on."
                 : 'LDRXN was not found, so there is nothing to base a Stage 1 on.';
 
-            return $result;
+            return [...$result, 'warnings' => array_values(array_unique($this->warnings))];
         }
 
         if ($spec->diesel) {
             $this->checkInjectionDuration($maps, $base, $proposals);
         }
 
-        $dyno = (new DynoEstimator)->estimate($maps, $spec, $original, $this->apply($base, $proposals, $roles));
+        if ($spec->diesel && ! $groups['torqueLimit'] && ! $groups['fullLoadLimit']) {
+            $this->warnings[] = 'No torque limiter was found, so only the driver\'s wish changes. Pick the full-load torque limiter for this role if the file has one.';
+        }
+
+        $dyno = (new DynoEstimator)->estimate($maps, $spec, $original, $this->apply($base, $proposals, $maps), $overrides);
         if ($options->maxTorque !== null && ($dyno['modified']['peakTorque']['value'] ?? 0) > $options->maxTorque) {
             $this->warnings[] = sprintf('Estimated peak torque %d Nm exceeds the %d Nm clutch/gearbox limit you entered. Lower the fuel increase or cap the torque limiter.',
                 $dyno['modified']['peakTorque']['value'], $options->maxTorque);
@@ -78,19 +105,23 @@ class Stage1Planner
      * Writes proposals into a buffer.
      *
      * @param  array<int, array<string, mixed>>  $proposals
-     * @param  array<string, MapDef>  $roles
+     * @param  MapDef[]  $maps  definitions the proposals refer to by id
      */
-    public function apply(Bin $bin, array $proposals, array $roles): Bin
+    public function apply(Bin $bin, array $proposals, array $maps): Bin
     {
+        $byId = [];
+        foreach ($maps as $map) {
+            $byId[$map->id] = $map;
+        }
         foreach ($proposals as $proposal) {
-            $bin = MapWriter::write($bin, $roles[$proposal['role']], $proposal['values']);
+            $bin = MapWriter::write($bin, $byId[$proposal['mapId']], $proposal['values']);
         }
 
         return $bin;
     }
 
     /**
-     * @param  array<string, MapValues>  $v
+     * @param  array<string, MapValues[]>  $v  maps per role
      * @return array<int, array<string, mixed>>
      */
     private function diesel(array $v, Stage1Options $o): array
@@ -98,39 +129,38 @@ class Stage1Planner
         $fuel = $o->fuelIncrease / 100;
         $boost = $o->boostIncrease / 100;
         $capFuel = fn (float $old, float $new): float => $o->maxFuel === null ? $new : max($old, min($new, $o->maxFuel));
-        $out = [];
 
-        if (! isset($v['torqueLimit']) && ! isset($v['wish'])) {
+        if (! $v['torqueLimit'] && ! $v['fullLoadLimit'] && ! $v['wish']) {
             return [];
         }
 
-        if (isset($v['torqueLimit'])) {
-            $out[] = $this->proposal('torqueLimit', $v['torqueLimit'],
+        $out = [
+            ...$this->proposals($v, 'torqueLimit',
                 fn (float $old): float => $capFuel($old, $old * (1 + $fuel)),
-                sprintf('Raise the fuel quantity limit by %d %% across the rev range.', $o->fuelIncrease));
-        }
+                sprintf('Raise the fuel quantity limit by %d %% across the rev range.', $o->fuelIncrease)),
+            ...$this->proposals($v, 'fullLoadLimit',
+                fn (float $old): float => $capFuel($old, $old * (1 + $fuel)),
+                sprintf('Raise the full-load fuel limit by %d %% so it does not cap the new torque limit.', $o->fuelIncrease)),
+            ...$this->proposals($v, 'wish',
+                fn (float $old, float $rpm, float $pedal, MapValues $map): float => $capFuel($old, $old * (1 + $fuel * $this->weight($map, $pedal, 0.6, 1.0))),
+                sprintf('Raise the requested fuel from 60 %% pedal upwards, reaching +%d %% at full pedal, so the request does not cap the new limit.', $o->fuelIncrease)),
+        ];
 
-        if (isset($v['wish'])) {
-            $out[] = $this->proposal('wish', $v['wish'],
-                fn (float $old, float $rpm, float $pedal): float => $capFuel($old, $old * (1 + $fuel * $this->weight($v['wish'], $pedal, 0.6, 1.0))),
-                sprintf('Raise the requested fuel from 60 %% pedal upwards, reaching +%d %% at full pedal, so the request does not cap the new limit.', $o->fuelIncrease));
-        }
-
-        if (isset($v['smoke'])) {
-            $out[] = $this->proposal('smoke', $v['smoke'],
-                fn (float $old, float $rpm, float $air): float => $capFuel($old, $old * (1 + $fuel * $this->weight($v['smoke'], $air, 0.3, 0.8))),
-                sprintf('Raise the smoke limit by up to %d %% at high air mass only; low air mass (spool-up) keeps the stock limit to avoid smoke.', $o->fuelIncrease));
+        if ($v['smoke']) {
+            $out = [...$out, ...$this->proposals($v, 'smoke',
+                fn (float $old, float $rpm, float $air, MapValues $map): float => $capFuel($old, $old * (1 + $fuel * $this->weight($map, $air, 0.3, 0.8))),
+                sprintf('Raise the smoke limit by up to %d %% at high air mass only; low air mass (spool-up) keeps the stock limit to avoid smoke.', $o->fuelIncrease))];
         } else {
             $this->warnings[] = 'No smoke limiter found. More fuel without a matching smoke limit can cause heavy smoke and high exhaust gas temperature.';
         }
 
-        if (isset($v['boost'])) {
-            $cap = $this->fromMbar($v['boost']->map->unit, $o->maxBoost);
+        if ($v['boost']) {
             $capped = 0;
-            $out[] = $this->proposal('boost', $v['boost'],
-                function (float $old, float $rpm, float $quantity) use ($v, $boost, $cap, &$capped): float {
+            $out = [...$out, ...$this->proposals($v, 'boost',
+                function (float $old, float $rpm, float $quantity, MapValues $map) use ($boost, $o, &$capped): float {
+                    $cap = $this->fromMbar($map->map->unit, $o->maxBoost);
                     $rpmWeight = $this->ramp($rpm, 1200, 1800) * (1 - 0.5 * $this->ramp($rpm, 3000, 4500));
-                    $new = $old * (1 + $boost * $this->weight($v['boost'], $quantity, 0.4, 0.8) * $rpmWeight);
+                    $new = $old * (1 + $boost * $this->weight($map, $quantity, 0.4, 0.8) * $rpmWeight);
                     if ($new > $cap && $new > $old) {
                         $capped++;
 
@@ -139,7 +169,7 @@ class Stage1Planner
 
                     return $new;
                 },
-                sprintf('Raise boost by up to %d %% at high fuel quantity, faded out below 1500 rpm and halved towards 4500 rpm to protect the turbo; capped at %d mbar.', $o->boostIncrease, $o->maxBoost));
+                sprintf('Raise boost by up to %d %% at high fuel quantity, faded out below 1500 rpm and halved towards 4500 rpm to protect the turbo; capped at %d mbar.', $o->boostIncrease, $o->maxBoost))];
             if ($capped) {
                 $this->warnings[] = sprintf('The boost target hit the %d mbar cap in %d cells.', $o->maxBoost, $capped);
             }
@@ -147,36 +177,35 @@ class Stage1Planner
             $this->warnings[] = 'No boost pressure target found. Extra fuel without extra air raises smoke and exhaust temperature.';
         }
 
-        if (isset($v['boostLimit'], $v['boost'])) {
-            $cap = $this->fromMbar($v['boostLimit']->map->unit, $o->maxBoost + self::BOOST_LIMIT_MARGIN);
-            $out[] = $this->proposal('boostLimit', $v['boostLimit'],
-                fn (float $old): float => max($old, min($old * (1 + $boost), $cap)),
-                sprintf('Raise the boost limiter by %d %% (at most %d mbar) so it does not cut the new boost target.', $o->boostIncrease, $o->maxBoost + self::BOOST_LIMIT_MARGIN));
+        if ($v['boost']) {
+            $out = [...$out, ...$this->proposals($v, 'boostLimit',
+                fn (float $old, float $rpm, float $other, MapValues $map): float => max($old, min($old * (1 + $boost), $this->fromMbar($map->map->unit, $o->maxBoost + self::BOOST_LIMIT_MARGIN))),
+                sprintf('Raise the boost limiter by %d %% (at most %d mbar) so it does not cut the new boost target.', $o->boostIncrease, $o->maxBoost + self::BOOST_LIMIT_MARGIN))];
         }
 
         return $out;
     }
 
     /**
-     * @param  array<string, MapValues>  $v
+     * @param  array<string, MapValues[]>  $v  maps per role
      * @return array<int, array<string, mixed>>
      */
     private function petrol(array $v, Stage1Options $o): array
     {
-        if (! isset($v['ldrxn'])) {
+        if (! $v['ldrxn']) {
             return [];
         }
         $load = $o->loadIncrease / 100;
         $cap = fn (float $old, float $new): float => max($old, min($new, $o->maxLoad));
 
-        $out = [$this->proposal('ldrxn', $v['ldrxn'],
+        $out = $this->proposals($v, 'ldrxn',
             fn (float $old): float => $cap($old, $old * (1 + $load)),
-            sprintf('Raise the maximum load by %d %%, capped at %d %%.', $o->loadIncrease, $o->maxLoad))];
+            sprintf('Raise the maximum load by %d %%, capped at %d %%.', $o->loadIncrease, $o->maxLoad));
 
-        if (isset($v['kfmirl'])) {
-            $out[] = $this->proposal('kfmirl', $v['kfmirl'],
-                fn (float $old, float $rpm, float $request): float => $cap($old, $old * (1 + $load * $this->weight($v['kfmirl'], $request, 0.6, 1.0))),
-                sprintf('Raise the load requested at high torque request by up to %d %% so the driver can reach the new LDRXN.', $o->loadIncrease));
+        if ($v['kfmirl']) {
+            $out = [...$out, ...$this->proposals($v, 'kfmirl',
+                fn (float $old, float $rpm, float $request, MapValues $map): float => $cap($old, $old * (1 + $load * $this->weight($map, $request, 0.6, 1.0))),
+                sprintf('Raise the load requested at high torque request by up to %d %% so the driver can reach the new LDRXN.', $o->loadIncrease))];
         } else {
             $this->warnings[] = 'KFMIRL was not found. The torque model may stop the engine from requesting the higher load.';
         }
@@ -187,9 +216,21 @@ class Stage1Planner
     }
 
     /**
-     * Builds one proposal by mapping every cell through $fn(old, rpm, other axis value).
+     * One proposal per map of a role, all built with the same rule.
      *
-     * @param  callable(float, float, float): float  $fn
+     * @param  array<string, MapValues[]>  $v
+     * @param  callable(float, float, float, MapValues): float  $fn
+     * @return array<int, array<string, mixed>>
+     */
+    private function proposals(array $v, string $role, callable $fn, string $summary): array
+    {
+        return array_map(fn (MapValues $values): array => $this->proposal($role, $values, $fn, $summary), $v[$role] ?? []);
+    }
+
+    /**
+     * Builds one proposal by mapping every cell through $fn(old, rpm, other axis value, map).
+     *
+     * @param  callable(float, float, float, MapValues): float  $fn
      * @return array<string, mixed>
      */
     private function proposal(string $role, MapValues $values, callable $fn, string $summary): array
@@ -200,7 +241,7 @@ class Stage1Planner
         foreach ($values->grid as $r => $row) {
             foreach ($row as $c => $old) {
                 [$rpm, $other] = $this->cellAxes($values, $r, $c);
-                $new = $this->quantize($map, $fn($old, $rpm, $other));
+                $new = $this->quantize($map, $fn($old, $rpm, $other, $values));
                 $grid[$r][$c] = $new;
                 if (abs($new - $old) > 1e-9) {
                     $changed++;
@@ -272,20 +313,26 @@ class Stage1Planner
     }
 
     /**
-     * Warns when the new fuel quantity runs past the fuel axis of the injection duration maps.
+     * Warns when the new full-load fuel quantity runs past the fuel axis of the injection duration maps.
+     * The effective limit is the lowest of the fuel limits, each at its highest value.
      *
      * @param  MapDef[]  $maps
      * @param  array<int, array<string, mixed>>  $proposals
      */
     private function checkInjectionDuration(array $maps, Bin $bin, array $proposals): void
     {
-        $peak = max(array_map(fn (array $p): float => $p['after']['max'], array_filter($proposals, fn (array $p): bool => $p['role'] === 'torqueLimit' || $p['role'] === 'wish')) ?: [0.0]);
-        foreach (MapRoles::all($maps, $bin, 'duration') as $map) {
-            $values = new MapValues($map, $bin);
-            $axis = preg_match('/mg/i', (string) $map->x?->unit) ? $values->x : (preg_match('/mg/i', (string) $map->y?->unit) ? $values->y : []);
-            if ($axis && max($axis) < $peak) {
-                $this->warnings[] = sprintf('%s ends at %.1f mg/st but the new limit reaches %.1f mg/st. Extend the duration maps (and check the injectors) before using this.', $map->name, max($axis), $peak);
+        $peaks = [];
+        foreach ($proposals as $p) {
+            if (in_array($p['role'], ['torqueLimit', 'fullLoadLimit', 'wish'], true)) {
+                $peaks[$p['role']] = max($peaks[$p['role']] ?? 0.0, $p['after']['max']);
             }
+        }
+        if (! $peaks) {
+            return;
+        }
+        $warning = InjectionCheck::warning($maps, $bin, min($peaks));
+        if ($warning !== null) {
+            $this->warnings[] = $warning;
         }
     }
 

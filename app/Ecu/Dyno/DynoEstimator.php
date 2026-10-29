@@ -21,6 +21,9 @@ class DynoEstimator
 {
     private const DIESEL_HEATING_VALUE = 42.6e6;
 
+    /** mg per mm³ */
+    private const DIESEL_DENSITY = 0.835;
+
     private const PETROL_HEATING_VALUE = 43.4e6;
 
     private const STOICH_AFR = 14.7;
@@ -39,11 +42,12 @@ class DynoEstimator
 
     private const RPM_STEP = 100;
 
-    private const DIESEL_ROLES = ['wish', 'torqueLimit', 'smoke', 'boost', 'boostLimit'];
+    private const DIESEL_ROLES = ['wish', 'torqueLimit', 'fullLoadLimit', 'smoke', 'boost', 'boostLimit'];
 
     private const LIMITER_LABELS = [
         'wish' => "Driver's wish",
         'torqueLimit' => 'Torque limiter',
+        'fullLoadLimit' => 'Full-load limit',
         'smoke' => 'Smoke limiter',
         'ldrxn' => 'Max load (LDRXN)',
         'kfmirl' => 'Torque request (KFMIRL)',
@@ -54,20 +58,22 @@ class DynoEstimator
 
     /**
      * @param  MapDef[]  $maps  definitions of the file
+     * @param  array<string, string>  $overrides  role => map id chosen by the user, or MapRoles::NONE
      * @return array<string, mixed>
      */
-    public function estimate(array $maps, EngineSpec $spec, Bin $stock, ?Bin $modified = null): array
+    public function estimate(array $maps, EngineSpec $spec, Bin $stock, ?Bin $modified = null, array $overrides = []): array
     {
         $this->notes = [];
-        $roles = MapRoles::assign($maps, $stock, $spec->diesel ? self::DIESEL_ROLES : MapRoles::PETROL);
-        $required = $spec->diesel ? ['wish', 'torqueLimit'] : ['ldrxn', 'kfmirl'];
+        $wanted = $spec->diesel ? self::DIESEL_ROLES : MapRoles::PETROL;
+        $roles = MapRoles::assign($maps, $stock, $wanted, $overrides);
+        $required = $spec->diesel ? ['wish', 'torqueLimit', 'fullLoadLimit'] : ['ldrxn', 'kfmirl'];
 
         $result = [
             'available' => false,
             'reason' => null,
             'engine' => $spec->toArray(),
             'calibrated' => false,
-            'maps' => array_map(fn (MapDef $m): array => ['id' => $m->id, 'name' => $m->name], $roles),
+            'roles' => MapRoles::describe($maps, $stock, $wanted, $overrides),
             'notes' => [],
             'stock' => null,
             'modified' => null,
@@ -142,10 +148,12 @@ class DynoEstimator
         $limits = [];
         if (isset($values['wish'])) {
             $pedal = $values['wish']->otherAxis();
-            $limits['wish'] = $values['wish']->atRpm($rpm, $pedal ? max($pedal) : 0.0);
+            $limits['wish'] = $this->toMg($values['wish'], $values['wish']->atRpm($rpm, $pedal ? max($pedal) : 0.0));
         }
-        if (isset($values['torqueLimit'])) {
-            $limits['torqueLimit'] = $values['torqueLimit']->atRpm($rpm, $this->pressureIn($values['torqueLimit'], self::STANDARD_ATM));
+        foreach (['torqueLimit', 'fullLoadLimit'] as $role) {
+            if (isset($values[$role])) {
+                $limits[$role] = $this->toMg($values[$role], $values[$role]->atRpm($rpm, $this->pressureIn($values[$role], self::STANDARD_ATM)));
+            }
         }
 
         $quantity = min($limits);
@@ -158,7 +166,7 @@ class DynoEstimator
                 }
                 $airMass = $boost * 100 * $spec->cylinderVolume() * self::VOLUMETRIC_EFFICIENCY
                     / (self::AIR_GAS_CONSTANT * self::CHARGE_TEMP) * 1e6;
-                $limits['smoke'] = $values['smoke']->atRpm($rpm, $airMass);
+                $limits['smoke'] = $this->toMg($values['smoke'], $values['smoke']->atRpm($rpm, $airMass));
             } else {
                 $this->notes[] = 'Smoke limiter found but no boost pressure target, so the smoke limit is not applied.';
             }
@@ -196,10 +204,16 @@ class DynoEstimator
         return [$energy / (4 * M_PI), $load, self::LIMITER_LABELS[$active]];
     }
 
+    /** Fuel quantity in mg/stroke; maps in mm³/stroke are converted with the density of diesel. */
+    private function toMg(MapValues $values, float $quantity): float
+    {
+        return preg_match('/mm\^?3|mm³/i', $values->map->unit) ? $quantity * self::DIESEL_DENSITY : $quantity;
+    }
+
     /** Brake efficiency of a common-rail / PD diesel, falling off with friction at high speed. */
     private function dieselEfficiency(int $rpm): float
     {
-        return max(0.30, 0.44 - 0.025 * (($rpm - 2000) / 1000) ** 2);
+        return max(0.28, 0.40 - 0.025 * (($rpm - 2000) / 1000) ** 2);
     }
 
     private function petrolEfficiency(int $rpm): float
@@ -236,7 +250,7 @@ class DynoEstimator
     {
         $max = 0.0;
         foreach ($values as $role => $v) {
-            if (in_array($role, ['wish', 'torqueLimit', 'ldrxn', 'kfmirl'], true)) {
+            if (in_array($role, ['wish', 'torqueLimit', 'fullLoadLimit', 'ldrxn', 'kfmirl'], true)) {
                 $axis = $v->rpmAxis();
                 $max = max($max, end($axis) ?: 0.0);
             }

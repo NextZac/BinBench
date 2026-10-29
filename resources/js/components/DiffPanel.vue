@@ -1,0 +1,160 @@
+<template>
+    <div class="flex h-full min-h-0 flex-col overflow-y-auto scroll-thin">
+        <div class="flex flex-wrap items-center gap-3 border-b border-line px-3 py-2 text-xs">
+            <div class="min-w-0">
+                <div class="text-sm font-semibold">Diff &amp; review</div>
+                <div class="text-[11px] text-muted">What changed against the original file, and whether it looks safe and well made.</div>
+            </div>
+            <label class="ml-auto flex items-center gap-2">Compare
+                <select v-model="source" class="input py-1">
+                    <option value="current">Current edits</option>
+                    <option v-for="v in ed.file.versions" :key="v.id" :value="v.id">{{ v.label }}</option>
+                </select>
+                with the original
+            </label>
+        </div>
+
+        <div v-if="error" class="p-6 text-center text-xs text-bad">{{ error }}</div>
+        <div v-else-if="!result" class="p-6 text-center text-xs text-muted">Comparing…</div>
+        <div v-else-if="result.review.verdict === 'none'" class="p-6 text-center text-xs text-muted">No differences to the original file.</div>
+
+        <template v-else>
+            <!-- verdict -->
+            <div class="flex flex-wrap items-center gap-3 px-3 pt-3 text-xs">
+                <span class="rounded-md px-2.5 py-1 text-sm font-semibold" :class="verdict.class">{{ verdict.label }}</span>
+                <span class="text-muted">{{ result.changedBytes }} bytes in {{ result.maps.length }} map{{ result.maps.length === 1 ? '' : 's' }}<template v-if="unmappedBytes">, {{ unmappedBytes }} outside known maps</template></span>
+                <span v-if="result.dyno" class="ml-auto font-mono text-[11px]">
+                    est. {{ Math.round(result.dyno.stock.power.value) }} → <b>{{ Math.round(result.dyno.modified.power.value) }} PS</b>,
+                    {{ Math.round(result.dyno.stock.torque.value) }} → <b>{{ Math.round(result.dyno.modified.torque.value) }} Nm</b>
+                    <span v-if="!result.dyno.calibrated" class="text-muted">(uncalibrated)</span>
+                </span>
+            </div>
+
+            <!-- findings -->
+            <div class="space-y-1.5 p-3">
+                <div v-for="(f, i) in result.review.findings" :key="i" class="flex gap-2 rounded-md border p-2 text-xs" :class="severity[f.severity].box">
+                    <span class="mt-px font-semibold" :class="severity[f.severity].text">{{ severity[f.severity].icon }}</span>
+                    <div class="min-w-0 flex-1">
+                        <div class="font-semibold">{{ f.title }}</div>
+                        <div class="text-[11px] text-muted">{{ f.detail }}</div>
+                        <div v-if="f.mapIds.length" class="mt-1 flex flex-wrap gap-1">
+                            <button v-for="id in f.mapIds.slice(0, 3)" :key="id" class="max-w-56 truncate rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] text-muted hover:text-accent"
+                                :title="mapName(id)" @click="ed.selectedId = id">{{ mapName(id) }}</button>
+                            <span v-if="f.mapIds.length > 3" class="text-[10px] text-muted" :title="f.mapIds.slice(3).map(mapName).join('\n')">+{{ f.mapIds.length - 3 }} more</span>
+                        </div>
+                    </div>
+                </div>
+                <div v-if="!result.review.findings.length" class="text-[11px] text-muted">No issues found by the checks.</div>
+                <p class="text-[11px] text-muted">Rule-of-thumb checks for common mistakes and aggressive values. They do not replace a datalog.</p>
+            </div>
+
+            <!-- changed maps -->
+            <div class="px-3 pb-3">
+                <div class="mb-1 text-xs font-semibold">Changed maps</div>
+                <table class="w-full text-[11px]">
+                    <thead class="text-left text-muted">
+                        <tr class="border-b border-line">
+                            <th class="py-1 pr-2 font-medium">Map</th>
+                            <th class="py-1 pr-2 text-right font-medium">Cells</th>
+                            <th class="py-1 pr-2 text-right font-medium">Avg</th>
+                            <th class="py-1 font-medium" />
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="m in sortedMaps" :key="m.id" class="border-b border-line/50 align-top">
+                            <td class="py-1 pr-2">
+                                <button class="text-left hover:text-accent" @click="ed.selectedId = m.id">{{ m.name }}</button>
+                                <div class="font-mono text-[10px] text-muted">{{ range(m.before) }} → <span class="text-accent">{{ range(m.after) }}</span> {{ m.unit }} · {{ m.category }}</div>
+                            </td>
+                            <td class="py-1 pr-2 text-right font-mono whitespace-nowrap">{{ m.changedCells }}/{{ m.cells }}</td>
+                            <td class="py-1 pr-2 text-right font-mono whitespace-nowrap" :class="m.meanChangePct > 0 ? 'text-ok' : m.meanChangePct < 0 ? 'text-bad' : ''">{{ m.meanChangePct === null ? '—' : (m.meanChangePct > 0 ? '+' : '') + m.meanChangePct + ' %' }}</td>
+                            <td class="py-1">
+                                <span class="flex flex-wrap justify-end gap-1">
+                                    <span v-if="m.clamped" class="chip bg-bad/15 text-bad">limit</span>
+                                    <span v-if="m.spike" class="chip bg-warn/15 text-warn">spike</span>
+                                    <span v-if="m.axisChanged" class="chip bg-warn/15 text-warn">axis</span>
+                                </span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <template v-if="result.unmapped.length">
+                    <div class="mt-3 mb-1 text-xs font-semibold">Changes outside known maps</div>
+                    <div class="flex flex-wrap gap-1.5 font-mono text-[11px]">
+                        <span v-for="u in result.unmapped" :key="u.start" class="rounded border border-line px-1.5 py-0.5">{{ hex(u.start) }}–{{ hex(u.end - 1) }} · {{ u.length }} B</span>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+</template>
+
+<script setup>
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { api } from '../lib/api';
+import { hex } from '../lib/binary';
+import { useEngineInputs } from '../lib/engine';
+import { useEditor } from '../stores/editor';
+
+// versionId: compare this saved version instead of the current edits.
+const props = defineProps({ versionId: { type: Number, default: null } });
+const ed = useEditor();
+const { params } = useEngineInputs(ed.file.id);
+const source = ref(props.versionId ?? 'current');
+const result = ref(null);
+const error = ref(null);
+let timer = null;
+let requestId = 0;
+
+const verdicts = {
+    risky: { label: 'Risky', class: 'bg-bad/20 text-bad' },
+    check: { label: 'Needs a look', class: 'bg-warn/20 text-warn' },
+    clean: { label: 'Looks clean', class: 'bg-ok/20 text-ok' },
+};
+const severity = {
+    danger: { icon: '✕', text: 'text-bad', box: 'border-bad/40 bg-bad/10' },
+    warning: { icon: '!', text: 'text-warn', box: 'border-warn/30 bg-warn/10' },
+    info: { icon: 'i', text: 'text-muted', box: 'border-line bg-panel-2' },
+};
+
+const verdict = computed(() => verdicts[result.value?.review.verdict] ?? verdicts.clean);
+const unmappedBytes = computed(() => (result.value?.unmapped ?? []).reduce((n, u) => n + u.length, 0));
+const sortedMaps = computed(() => [...(result.value?.maps ?? [])].sort((a, b) => Math.abs(b.meanChangePct ?? 0) - Math.abs(a.meanChangePct ?? 0)));
+
+function mapName(id) {
+    return ed.maps.find((m) => m.id === id)?.name ?? id;
+}
+
+function range(r) {
+    const f = (v) => (Math.abs(v) >= 100 ? Math.round(v) : Math.round(v * 100) / 100);
+    return r.min === r.max ? `${f(r.min)}` : `${f(r.min)}–${f(r.max)}`;
+}
+
+async function compare() {
+    const id = ++requestId;
+    try {
+        const bytes = source.value === 'current'
+            ? (ed.dirty ? ed.current : null)
+            : await api.versionRaw(ed.file.id, source.value);
+        const res = await api.diff(ed.file.id, bytes, params());
+        if (id !== requestId) return;
+        error.value = null;
+        result.value = res;
+    } catch (e) {
+        if (id === requestId) error.value = e.message;
+    }
+}
+
+watch(source, compare);
+watch(() => props.versionId, (v) => {
+    if (v !== null) source.value = v;
+});
+watch(() => ed.revision, () => {
+    if (source.value !== 'current') return;
+    clearTimeout(timer);
+    timer = setTimeout(compare, 800);
+});
+onMounted(compare);
+onBeforeUnmount(() => clearTimeout(timer));
+</script>

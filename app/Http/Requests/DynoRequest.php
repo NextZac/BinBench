@@ -27,6 +27,8 @@ class DynoRequest extends FormRequest
             'displacement' => ['nullable', 'numeric', 'between:0.5,10'],
             'cylinders' => ['nullable', 'integer', 'between:1,16'],
             'stock_power' => ['nullable', 'numeric', 'between:20,2000'],
+            'roles' => ['nullable', 'array'],
+            'roles.*' => ['nullable', 'string', 'max:255'],
         ];
     }
 
@@ -64,6 +66,16 @@ class DynoRequest extends FormRequest
             'cylinders' => $this->filled('cylinders') ? (int) $this->input('cylinders') : null,
             'stock_power' => $this->filled('stock_power') ? (float) $this->input('stock_power') : null,
         ]);
+    }
+
+    /**
+     * Maps the user picked per role (map id or MapRoles::NONE); roles left on automatic are absent.
+     *
+     * @return array<string, string>
+     */
+    public function roleOverrides(): array
+    {
+        return array_filter((array) $this->input('roles', []), fn (mixed $id): bool => is_string($id) && $id !== '');
     }
 
     private function sentBuffer(): bool
