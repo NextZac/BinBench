@@ -28,6 +28,8 @@ async function request(method, url, body, { raw = false } = {}) {
     return res.status === 204 ? null : res.json();
 }
 
+const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== '' && v !== undefined));
+
 export const api = {
     files: () => request('GET', '/files'),
     file: (id) => request('GET', `/files/${id}`),
@@ -42,6 +44,9 @@ export const api = {
     raw: (id) => request('GET', `/files/${id}/raw`, null, { raw: true }),
     versionRaw: (id, versionId) => request('GET', `/files/${id}/versions/${versionId}/raw`, null, { raw: true }),
     checksum: (id, bytes) => request('POST', `/files/${id}/checksum`, bytes),
+    dyno: (id, bytes, params = {}) => request('POST', `/files/${id}/dyno?${query(params)}`, bytes ?? undefined),
+    stage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1?${query(params)}`, bytes ?? undefined),
+    explainStage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1/explain?${query(params)}`, bytes ?? undefined),
     saveVersion: (id, bytes, { label, fix, changedMaps }) => {
         const form = new FormData();
         form.append('file', new Blob([bytes]), 'modified.bin');

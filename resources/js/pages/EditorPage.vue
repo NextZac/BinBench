@@ -20,6 +20,12 @@
                 <button class="btn" :disabled="!ed.undoStack.length" title="Ctrl+Z" @click="ed.undo()">↶ Undo</button>
                 <button class="btn" :disabled="!ed.redoStack.length" title="Ctrl+Y" @click="ed.redo()">↷ Redo</button>
                 <span class="mx-1 h-5 w-px bg-line" />
+                <div class="flex overflow-hidden rounded-md border border-line">
+                    <button v-for="v in mainViews" :key="v.id" class="px-2.5 py-1.5 text-xs font-medium"
+                        :class="mainView === v.id ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
+                        @click="mainView = v.id">{{ v.label }}</button>
+                </div>
+                <span class="mx-1 h-5 w-px bg-line" />
                 <button class="btn" @click="$refs.xdfInput.click()">Import XDF</button>
                 <input ref="xdfInput" type="file" accept=".xdf,.xml" class="hidden" @change="importXdf">
                 <a class="btn" :href="`/api/files/${ed.file.id}/xdf`">Export XDF</a>
@@ -36,7 +42,9 @@
 
             <!-- map area -->
             <section class="flex min-w-0 flex-1 flex-col">
-                <template v-if="map">
+                <DynoPanel v-if="mainView === 'dyno'" />
+                <Stage1Panel v-else-if="mainView === 'stage1'" />
+                <template v-else-if="map">
                     <div class="flex items-center gap-3 border-b border-line px-3 py-2">
                         <div class="min-w-0">
                             <div class="truncate text-sm font-semibold">{{ map.name }}</div>
@@ -185,12 +193,16 @@ import MapProperties from '../components/MapProperties.vue';
 import MapTable from '../components/MapTable.vue';
 
 const MapChart = defineAsyncComponent(() => import('../components/MapChart.vue'));
+const DynoPanel = defineAsyncComponent(() => import('../components/DynoPanel.vue'));
+const Stage1Panel = defineAsyncComponent(() => import('../components/Stage1Panel.vue'));
 
 const props = defineProps({ id: { type: String, required: true } });
 const ed = useEditor();
 const loading = ref(true);
 const views = ['Table', 'Split', '3D', 'Hex'];
 const view = ref('Split');
+const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }];
+const mainView = ref('maps');
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
 const side = ref('ECU');
 const saveDialog = ref(false);
@@ -240,6 +252,11 @@ async function load() {
         loading.value = false;
     }
 }
+
+// picking a map (in the list or from the dyno) goes back to the map view
+watch(() => ed.selectedId, () => {
+    mainView.value = 'maps';
+});
 
 let checksumTimer = null;
 watch(() => ed.revision, () => {

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Ecu\Maps\MapDef;
 use App\Models\EcuFile;
 use App\Models\MapDefinition;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -78,6 +79,45 @@ class EcuFileApiTest extends TestCase
         $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
 
         $this->postJson(route('files.versions.store', $id), ['file' => UploadedFile::fake()->createWithContent('m.bin', str_repeat("\0", 2048))])
+            ->assertUnprocessable();
+    }
+
+    public function test_dyno_reports_missing_limiter_maps(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+
+        $this->postJson(route('files.dyno', $id))
+            ->assertOk()
+            ->assertJsonPath('available', false)
+            ->assertJsonPath('stock', null);
+    }
+
+    public function test_dyno_compares_original_with_modified_buffer(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $file = EcuFile::find($id);
+        $limiter = (new MapDef('Torque limiter (IQ vs rpm)', $this->mapAddress, 1, 7, factor: 0.01, unit: 'mg/st', confidence: 0.6))->toArray();
+        $limiter['x'] = ['count' => 7, 'values' => [1000, 1500, 2000, 2500, 3000, 3500, 4000], 'unit' => '1/min', 'name' => 'Engine speed'];
+        $file->update(['maps' => [$limiter]]);
+        $modified = substr_replace($file->bin()->data, pack('v', 2000), $this->mapAddress, 2);
+
+        $response = $this->call('POST', route('files.dyno', [$file, 'displacement' => 1.9, 'cylinders' => 4]), [], [], [],
+            ['CONTENT_TYPE' => 'application/octet-stream', 'HTTP_ACCEPT' => 'application/json'], $modified);
+
+        $response->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('engine.displacement', 1.9)
+            ->assertJsonPath('stock.fuel.0', 10)
+            ->assertJsonPath('modified.fuel.0', 20)
+            ->assertJsonPath('modified.limiter.0', 'Torque limiter');
+    }
+
+    public function test_dyno_rejects_buffer_with_different_size(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+
+        $this->call('POST', route('files.dyno', $id), [], [], [],
+            ['CONTENT_TYPE' => 'application/octet-stream', 'HTTP_ACCEPT' => 'application/json'], str_repeat("\0", 2048))
             ->assertUnprocessable();
     }
 

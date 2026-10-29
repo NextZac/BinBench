@@ -4,10 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
+use App\Ecu\Dyno\DynoEstimator;
 use App\Ecu\Maps\MapDef;
 use App\Ecu\Xdf\XdfExporter;
 use App\Ecu\Xdf\XdfImporter;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\DynoRequest;
 use App\Models\EcuFile;
 use App\Models\EcuFileVersion;
 use App\Models\MapDefinition;
@@ -101,6 +103,16 @@ class EcuFileController extends Controller
         $analyzer = new Analyzer;
 
         return response()->json($analyzer->checksumReport($analyzer->family($file->family_id)?->checksum($bin), $bin));
+    }
+
+    /**
+     * Estimated torque and power of the original file and, when the editor sends one, of a modified buffer.
+     */
+    public function dyno(DynoRequest $request, EcuFile $file): JsonResponse
+    {
+        $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
+
+        return response()->json((new DynoEstimator)->estimate($maps, $request->engineSpec(), $file->bin(), $request->buffer()));
     }
 
     /**
