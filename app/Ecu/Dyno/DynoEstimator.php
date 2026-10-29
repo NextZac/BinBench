@@ -64,7 +64,7 @@ class DynoEstimator
     public function estimate(array $maps, EngineSpec $spec, Bin $stock, ?Bin $modified = null, array $overrides = []): array
     {
         $this->notes = [];
-        $wanted = $spec->diesel ? self::DIESEL_ROLES : MapRoles::PETROL;
+        $wanted = $spec->diesel ? self::DIESEL_ROLES : ['ldrxn', 'kfmirl'];
         $roles = MapRoles::assign($maps, $stock, $wanted, $overrides);
         $required = $spec->diesel ? ['wish', 'torqueLimit', 'fullLoadLimit'] : ['ldrxn', 'kfmirl'];
 
@@ -136,7 +136,7 @@ class DynoEstimator
             $curve['limiter'][] = $limiter;
         }
 
-        return $this->withPeaks($curve);
+        return $this->withPeaks($this->trimCutoff($curve));
     }
 
     /**
@@ -259,6 +259,27 @@ class DynoEstimator
         $to = (int) (floor(min($max ?: $cap, $cap) / self::RPM_STEP) * self::RPM_STEP);
 
         return [$from, max($from + self::RPM_STEP, $to)];
+    }
+
+    /**
+     * Ends the curve at the fuel cut-off: a limiter that drops to (nearly) zero at the top of its
+     * axis is the rev limit, so only the first point of that drop is kept.
+     *
+     * @param  array<string, mixed>  $curve
+     * @return array<string, mixed>
+     */
+    private function trimCutoff(array $curve): array
+    {
+        $floor = max($curve['torque']) * 0.1;
+        $last = count($curve['rpm']) - 1;
+        while ($last > 1 && $curve['torque'][$last - 1] < $floor) {
+            $last--;
+        }
+        foreach ($curve as $series => $points) {
+            $curve[$series] = array_slice($points, 0, $last + 1);
+        }
+
+        return $curve;
     }
 
     /**

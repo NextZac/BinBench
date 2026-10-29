@@ -21,10 +21,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class EcuFileController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         return response()->json(
-            EcuFile::latest()->get(['id', 'name', 'original_filename', 'size', 'family', 'family_id', 'sw', 'map_count', 'checksums', 'created_at'])
+            $request->user()->ecuFiles()->latest()->get(['id', 'name', 'original_filename', 'size', 'family', 'family_id', 'sw', 'map_count', 'checksums', 'created_at'])
                 ->map(fn (EcuFile $f): array => [
                     ...$f->only(['id', 'name', 'original_filename', 'size', 'family', 'family_id', 'sw', 'map_count', 'created_at']),
                     'checksumOk' => $f->checksums['ok'] ?? null,
@@ -44,7 +44,7 @@ class EcuFileController extends Controller
         $path = 'bins/'.Str::uuid().'.bin';
         Storage::disk('local')->put($path, $data);
 
-        $file = EcuFile::create([
+        $file = $request->user()->ecuFiles()->create([
             'name' => pathinfo($upload->getClientOriginalName(), PATHINFO_FILENAME),
             'original_filename' => $upload->getClientOriginalName(),
             'size' => strlen($data),
@@ -197,7 +197,7 @@ class EcuFileController extends Controller
         }
 
         $maps = array_values(array_filter($result['maps'], fn (MapDef $m): bool => $m->address + $m->byteSize() <= $file->size));
-        MapDefinition::create([
+        $file->user->mapDefinitions()->create([
             'name' => $result['title'] ?: $request->file('file')->getClientOriginalName(),
             'sw' => $file->sw,
             'family_id' => $file->family_id,
@@ -233,7 +233,7 @@ class EcuFileController extends Controller
         return [
             ...$file->only(['id', 'name', 'original_filename', 'size', 'sha1', 'family', 'family_id', 'sw', 'ident', 'maps', 'checksums', 'notes', 'created_at']),
             'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'checksums', 'changed_maps', 'created_at']),
-            'definitions' => $file->sw ? MapDefinition::where('sw', $file->sw)->get(['id', 'name', 'source_filename', 'map_count', 'created_at']) : [],
+            'definitions' => $file->sw ? MapDefinition::where('sw', $file->sw)->where('user_id', $file->user_id)->get(['id', 'name', 'source_filename', 'map_count', 'created_at']) : [],
         ];
     }
 }

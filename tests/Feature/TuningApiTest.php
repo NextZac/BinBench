@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\EcuFile;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Http\UploadedFile;
@@ -21,6 +22,7 @@ class TuningApiTest extends TestCase
     {
         parent::setUp();
         Storage::fake('local');
+        $this->actingAs(User::factory()->create());
         config(['services.tuning_ai' => ['base_url' => null, 'api_key' => null, 'model' => null]]);
 
         // EDC15 with driver's wish, torque limiter, smoke limiter and boost target the classifier recognises

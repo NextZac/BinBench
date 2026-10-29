@@ -1,5 +1,10 @@
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.content ?? '';
 
+/** Logging in or out rotates the session, and with it the CSRF token the API expects. */
+export function setCsrfToken(token) {
+    document.querySelector('meta[name="csrf-token"]')?.setAttribute('content', token);
+}
+
 async function request(method, url, body, { raw = false } = {}) {
     const headers = { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() };
     let payload = body;
@@ -11,6 +16,10 @@ async function request(method, url, body, { raw = false } = {}) {
         headers['Content-Type'] = 'application/octet-stream';
     }
     const res = await fetch(`/api${url}`, { method, headers, body: payload });
+    if (res.status === 401 && !url.startsWith('/auth')) {
+        // session expired or signed out in another tab
+        window.dispatchEvent(new CustomEvent('binbench:unauthenticated'));
+    }
     if (!res.ok) {
         let message = `${res.status} ${res.statusText}`;
         try {
@@ -31,6 +40,10 @@ async function request(method, url, body, { raw = false } = {}) {
 const query = (params) => new URLSearchParams(Object.entries(params).filter(([, v]) => v !== null && v !== '' && v !== undefined));
 
 export const api = {
+    auth: () => request('GET', '/auth'),
+    login: (data) => request('POST', '/auth/login', data),
+    register: (data) => request('POST', '/auth/register', data),
+    logout: () => request('POST', '/auth/logout', {}),
     files: () => request('GET', '/files'),
     file: (id) => request('GET', `/files/${id}`),
     upload: (file) => {

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Ecu\Maps\MapDef;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
  * A reusable set of map definitions (e.g. an imported XDF), matched to files by software number.
@@ -15,6 +16,14 @@ class MapDefinition extends Model
     protected function casts(): array
     {
         return ['maps' => 'array'];
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     /**

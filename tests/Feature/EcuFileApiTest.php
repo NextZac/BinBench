@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Ecu\Maps\MapDef;
 use App\Models\EcuFile;
 use App\Models\MapDefinition;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -21,6 +22,7 @@ class EcuFileApiTest extends TestCase
     {
         parent::setUp();
         Storage::fake('local');
+        $this->actingAs(User::factory()->create());
     }
 
     private function edc15Upload(): UploadedFile

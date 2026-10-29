@@ -44,6 +44,8 @@ class Stage1Planner
     public function plan(array $maps, EngineSpec $spec, Bin $original, Bin $base, Stage1Options $options, array $overrides = []): array
     {
         $this->warnings = [];
+        $detected = MapRoles::isTurbo($maps, $base, $spec->diesel);
+        $turbo = $options->turbo ?? $detected ?? true;
         $wanted = $spec->diesel ? MapRoles::DIESEL : MapRoles::PETROL;
         $groups = [];
         foreach ($wanted as $role) {
@@ -56,12 +58,20 @@ class Stage1Planner
             'options' => $options->toArray(),
             'proposals' => [],
             'warnings' => [],
-            'notes' => $this->notes($spec),
+            'notes' => $this->notes($spec, $turbo),
+            'aspiration' => [
+                'detected' => $detected === null ? null : ($detected ? 'turbo' : 'na'),
+                'used' => $turbo ? 'turbo' : 'na',
+            ],
             'roles' => MapRoles::describe($maps, $base, $wanted, $overrides),
             'dyno' => null,
         ];
 
-        $proposals = $spec->diesel ? $this->diesel($groups, $options) : $this->petrol($groups, $options);
+        $proposals = match (true) {
+            ! $turbo => $this->naturallyAspirated($groups, $options, $spec),
+            $spec->diesel => $this->diesel($groups, $options),
+            default => $this->petrol($groups, $options),
+        };
         // a map matching two roles is changed once, by the first rule
         $proposals = array_values(array_intersect_key($proposals, array_unique(array_column($proposals, 'mapId'))));
         foreach ($proposals as $p) {
@@ -71,18 +81,22 @@ class Stage1Planner
         }
         $proposals = array_values(array_filter($proposals, fn (array $p): bool => $p['changedCells'] > 0));
         if (! $proposals) {
-            $result['reason'] = $spec->diesel
-                ? "No torque limiter or driver's wish map was found, so there is nothing to base a Stage 1 on."
-                : 'LDRXN was not found, so there is nothing to base a Stage 1 on.';
+            $result['reason'] = match (true) {
+                ! $turbo => $spec->diesel
+                    ? "No driver's wish map was found, so there is nothing to shape the response with."
+                    : 'No pedal map (KFPED) was found, so there is nothing to shape the response with.',
+                $spec->diesel => "No torque limiter or driver's wish map was found, so there is nothing to base a Stage 1 on.",
+                default => 'LDRXN was not found, so there is nothing to base a Stage 1 on.',
+            };
 
             return [...$result, 'warnings' => array_values(array_unique($this->warnings))];
         }
 
-        if ($spec->diesel) {
+        if ($spec->diesel && $turbo) {
             $this->checkInjectionDuration($maps, $base, $proposals);
         }
 
-        if ($spec->diesel && ! $groups['torqueLimit'] && ! $groups['fullLoadLimit']) {
+        if ($spec->diesel && $turbo && ! $groups['torqueLimit'] && ! $groups['fullLoadLimit']) {
             $this->warnings[] = 'No torque limiter was found, so only the driver\'s wish changes. Pick the full-load torque limiter for this role if the file has one.';
         }
 
@@ -128,7 +142,7 @@ class Stage1Planner
     {
         $fuel = $o->fuelIncrease / 100;
         $boost = $o->boostIncrease / 100;
-        $capFuel = fn (float $old, float $new): float => $o->maxFuel === null ? $new : max($old, min($new, $o->maxFuel));
+        $capFuel = fn (float $old, float $new): float => $o->maxFuel === null ? $new : $this->softCap($old, $new, $o->maxFuel);
 
         if (! $v['torqueLimit'] && ! $v['fullLoadLimit'] && ! $v['wish']) {
             return [];
@@ -163,11 +177,9 @@ class Stage1Planner
                     $new = $old * (1 + $boost * $this->weight($map, $quantity, 0.4, 0.8) * $rpmWeight);
                     if ($new > $cap && $new > $old) {
                         $capped++;
-
-                        return max($old, $cap);
                     }
 
-                    return $new;
+                    return $this->softCap($old, $new, $cap);
                 },
                 sprintf('Raise boost by up to %d %% at high fuel quantity, faded out below 1500 rpm and halved towards 4500 rpm to protect the turbo; capped at %d mbar.', $o->boostIncrease, $o->maxBoost))];
             if ($capped) {
@@ -179,7 +191,7 @@ class Stage1Planner
 
         if ($v['boost']) {
             $out = [...$out, ...$this->proposals($v, 'boostLimit',
-                fn (float $old, float $rpm, float $other, MapValues $map): float => max($old, min($old * (1 + $boost), $this->fromMbar($map->map->unit, $o->maxBoost + self::BOOST_LIMIT_MARGIN))),
+                fn (float $old, float $rpm, float $other, MapValues $map): float => $this->softCap($old, $old * (1 + $boost), $this->fromMbar($map->map->unit, $o->maxBoost + self::BOOST_LIMIT_MARGIN)),
                 sprintf('Raise the boost limiter by %d %% (at most %d mbar) so it does not cut the new boost target.', $o->boostIncrease, $o->maxBoost + self::BOOST_LIMIT_MARGIN))];
         }
 
@@ -196,7 +208,7 @@ class Stage1Planner
             return [];
         }
         $load = $o->loadIncrease / 100;
-        $cap = fn (float $old, float $new): float => max($old, min($new, $o->maxLoad));
+        $cap = fn (float $old, float $new): float => $this->softCap($old, $new, $o->maxLoad);
 
         $out = $this->proposals($v, 'ldrxn',
             fn (float $old): float => $cap($old, $old * (1 + $load)),
@@ -213,6 +225,57 @@ class Stage1Planner
         $this->warnings[] = 'Ignition (KFZW) is not changed. More load means more knock risk: datalog timing pulls before going further.';
 
         return $out;
+    }
+
+    /**
+     * Naturally aspirated engines cannot take more air, so full-load power barely moves. The
+     * useful change is response: more torque request in the first part of the pedal travel, with
+     * full pedal unchanged.
+     *
+     * @param  array<string, MapValues[]>  $v  maps per role
+     * @return array<int, array<string, mixed>>
+     */
+    private function naturallyAspirated(array $v, Stage1Options $o, EngineSpec $spec): array
+    {
+        $role = $spec->diesel ? 'wish' : 'pedal';
+        $summary = sprintf('Sharpen throttle response: up to +%d %% torque request around 30 %% pedal, fading out towards idle and full pedal. Full pedal stays the same, the map stays rising with pedal.', $o->responseIncrease);
+
+        return array_map(fn (MapValues $values): array => $this->responseProposal($role, $values, $o->responseIncrease / 100, $summary), $v[$role] ?? []);
+    }
+
+    /**
+     * Raises each engine speed line of a pedal map with a bell over the pedal travel (peak at
+     * 30 % pedal), keeps it rising with pedal and never above the full-pedal value of that line.
+     *
+     * @return array<string, mixed>
+     */
+    private function responseProposal(string $role, MapValues $values, float $increase, string $summary): array
+    {
+        $map = $values->map;
+        $pedalOnRows = $values->rpmOnX();
+        $pedal = $pedalOnRows ? $values->y : $values->x;
+        $lines = $pedalOnRows ? $map->cols : $map->rows;
+        $min = min($pedal);
+        $span = max(max($pedal) - $min, 1e-9);
+        $grid = $values->grid;
+
+        for ($line = 0; $line < $lines; $line++) {
+            $cell = fn (int $i): array => $pedalOnRows ? [$i, $line] : [$line, $i];
+            [$fr, $fc] = $cell(count($pedal) - 1);
+            $full = $values->grid[$fr][$fc];
+            $previous = -INF;
+            foreach (array_keys($pedal) as $i) {
+                [$r, $c] = $cell($i);
+                $old = $values->grid[$r][$c];
+                $f = ($pedal[$i] - $min) / $span;
+                $bell = $this->ramp($f, 0.0, 0.3) * (1 - $this->ramp($f, 0.3, 1.0));
+                $new = max($old, min($old * (1 + $increase * $bell), $full), $previous);
+                $grid[$r][$c] = $this->quantize($map, $new);
+                $previous = $grid[$r][$c];
+            }
+        }
+
+        return $this->package($role, $values, $grid, $summary);
     }
 
     /**
@@ -235,15 +298,28 @@ class Stage1Planner
      */
     private function proposal(string $role, MapValues $values, callable $fn, string $summary): array
     {
-        $map = $values->map;
         $grid = [];
-        $changed = 0;
         foreach ($values->grid as $r => $row) {
             foreach ($row as $c => $old) {
                 [$rpm, $other] = $this->cellAxes($values, $r, $c);
-                $new = $this->quantize($map, $fn($old, $rpm, $other, $values));
-                $grid[$r][$c] = $new;
-                if (abs($new - $old) > 1e-9) {
+                $grid[$r][$c] = $this->quantize($values->map, $fn($old, $rpm, $other, $values));
+            }
+        }
+
+        return $this->package($role, $values, $grid, $summary);
+    }
+
+    /**
+     * @param  float[][]  $grid  new physical values
+     * @return array<string, mixed>
+     */
+    private function package(string $role, MapValues $values, array $grid, string $summary): array
+    {
+        $map = $values->map;
+        $changed = 0;
+        foreach ($grid as $r => $row) {
+            foreach ($row as $c => $new) {
+                if (abs($new - $values->grid[$r][$c]) > 1e-9) {
                     $changed++;
                 }
             }
@@ -298,9 +374,27 @@ class Stage1Planner
         return $span > 0 ? $this->ramp(($value - $min) / $span, $from, $to) : 1.0;
     }
 
+    /** Smoothstep fade from 0 at $from to 1 at $to: no kink where the change starts or ends. */
     private function ramp(float $value, float $from, float $to): float
     {
-        return max(0.0, min(1.0, ($value - $from) / ($to - $from)));
+        $t = max(0.0, min(1.0, ($value - $from) / ($to - $from)));
+
+        return $t * $t * (3 - 2 * $t);
+    }
+
+    /**
+     * Limits a raised value to $cap with a soft knee over the last 3 % below it, so cells near the
+     * cap bend into it instead of forming a flat plateau with a sharp edge. Never lowers $old.
+     */
+    private function softCap(float $old, float $new, float $cap): float
+    {
+        $band = max(abs($cap) * 0.03, 1e-6);
+        $knee = $cap - $band;
+        if ($new <= $old || $new <= $knee) {
+            return $new;
+        }
+
+        return max($old, $knee + $band * (1 - exp(-($new - $knee) / $band)));
     }
 
     private function fromMbar(string $unit, float $mbar): float
@@ -339,14 +433,17 @@ class Stage1Planner
     /**
      * @return string[]
      */
-    private function notes(EngineSpec $spec): array
+    private function notes(EngineSpec $spec, bool $turbo): array
     {
-        return [
+        return array_values(array_filter([
+            $turbo ? null : 'Naturally aspirated engine: software alone adds little full-load power (a few percent at best, usually from ignition and lambda on a dyno). This proposal only changes how the throttle responds.',
             'Emission maps (EGR, DPF, SCR, lambda) are left unchanged.',
-            $spec->diesel
-                ? 'Datalog before and after: boost actual vs. target, rail pressure, exhaust gas temperature and smoke.'
-                : 'Datalog before and after: boost actual vs. target, ignition timing pulls, lambda and intake temperature.',
+            match (true) {
+                ! $turbo => 'Test drive before and after: the pedal should feel livelier in the first third without jerking on and off throttle.',
+                $spec->diesel => 'Datalog before and after: boost actual vs. target, rail pressure, exhaust gas temperature and smoke.',
+                default => 'Datalog before and after: boost actual vs. target, ignition timing pulls, lambda and intake temperature.',
+            },
             'Correct the checksums before flashing.',
-        ];
+        ]));
     }
 }

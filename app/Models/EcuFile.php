@@ -6,6 +6,7 @@ use App\Ecu\Analyzer;
 use App\Ecu\Bin;
 use App\Ecu\Maps\MapDef;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 
@@ -26,6 +27,14 @@ class EcuFile extends Model
     }
 
     /**
+     * @return BelongsTo<User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
      * @return HasMany<EcuFileVersion, $this>
      */
     public function versions(): HasMany
@@ -39,7 +48,7 @@ class EcuFile extends Model
     }
 
     /**
-     * Identify the file, find maps (plus any stored definitions for the same software) and check checksums.
+     * Identify the file, find maps (plus the owner's stored definitions for the same software) and check checksums.
      */
     public function analyze(): self
     {
@@ -49,7 +58,7 @@ class EcuFile extends Model
 
         $known = [];
         if ($sw) {
-            foreach (MapDefinition::where('sw', $sw)->latest()->get() as $definition) {
+            foreach (MapDefinition::where('sw', $sw)->where('user_id', $this->user_id)->latest()->get() as $definition) {
                 array_push($known, ...$definition->mapDefs());
             }
         }

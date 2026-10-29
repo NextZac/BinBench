@@ -77,6 +77,8 @@ class Stage1PlannerTest extends TestCase
         $this->assertSame([1000.0, 1500.0, 2000.0, 2500.0], $boost['values'][0]);
         $this->assertSame(2600.0, $boost['values'][2][3]);
         $this->assertSame(2600.0, $boost['after']['max']);
+        // cells below the cap keep rising towards it instead of forming a plateau
+        $this->assertSame($boost['values'][2], array_values(array_unique($boost['values'][2])));
         $this->assertStringContainsString('2600 mbar cap', implode(' ', $plan['warnings']));
 
         // a stock value already above the cap is kept, never lowered
@@ -147,9 +149,55 @@ class Stage1PlannerTest extends TestCase
         $plan = (new Stage1Planner)->plan($maps, new EngineSpec(1.8, 4, false, null, false), $bin, $bin, new Stage1Options(loadIncrease: 15, maxLoad: 180));
         $ldrxn = $this->proposal($plan, 'ldrxn');
 
-        $this->assertEqualsWithDelta(180.0, $ldrxn['after']['max'], 0.03);
+        // the soft knee bends into the cap without passing it
+        $this->assertEqualsWithDelta(180.0, $ldrxn['after']['max'], 0.1);
+        $this->assertLessThanOrEqual(180.0, $ldrxn['after']['max']);
         $this->assertEqualsWithDelta(6000 * 0.023438 * 1.15, $ldrxn['values'][0][0], 0.03);
         $this->assertStringContainsString('KFMIRL was not found', implode(' ', $plan['warnings']));
+    }
+
+    public function test_naturally_aspirated_petrol_gets_pedal_response_only(): void
+    {
+        $synthetic = new SyntheticBin(0x1000);
+        $rpm = [1000, 2000, 3000, 4000, 5000, 6000];
+        $pedal = [0, 1000, 2000, 3000, 5000, 7000, 10000];
+        $maps = [
+            // 100 % load ceiling: nothing a charged engine would run
+            $synthetic->map('ldrxn', 0x100, 'LDRXN', $rpm, 'nmot_w', 'rpm', null, [array_fill(0, 6, 4267)], 0.023438, '%'),
+            // linear pedal map: request = pedal
+            $synthetic->map('pedal', 0x200, 'KFPED', $pedal, 'wped (pedal)', '%', $rpm, array_map(fn (): array => array_map(fn (int $p): int => (int) ($p * 3.2768), $pedal), $rpm), 0.0030518, '%'),
+        ];
+        $bin = new Bin($synthetic->data());
+        $spec = new EngineSpec(2.0, 4, false, null, false);
+
+        $plan = (new Stage1Planner)->plan($maps, $spec, $bin, $bin, new Stage1Options);
+
+        $this->assertSame(['detected' => 'na', 'used' => 'na'], $plan['aspiration']);
+        $this->assertSame(['pedal'], array_column($plan['proposals'], 'role'));
+        $row = $this->proposal($plan, 'pedal')['values'][2];
+        $this->assertEqualsWithDelta(30.0 * 1.15, $row[3], 0.05);
+        $this->assertEqualsWithDelta(100.0, $row[6], 0.01);
+        $this->assertSame($row, array_values(array_unique($row)));
+        $sorted = $row;
+        sort($sorted);
+        $this->assertSame($sorted, $row);
+        $this->assertStringContainsString('Naturally aspirated', $plan['notes'][0]);
+
+        // forcing turbo brings back the load-based Stage 1
+        $forced = (new Stage1Planner)->plan($maps, $spec, $bin, $bin, new Stage1Options(turbo: true));
+        $this->assertSame(['ldrxn'], array_column($forced['proposals'], 'role'));
+    }
+
+    public function test_diesel_without_boost_maps_counts_as_naturally_aspirated(): void
+    {
+        $maps = array_values(array_filter($this->maps, fn (MapDef $m): bool => ! str_contains($m->name, 'Boost')));
+        $bin = new Bin($this->synthetic->data());
+
+        $plan = (new Stage1Planner)->plan($maps, $this->diesel(), $bin, $bin, new Stage1Options);
+
+        $this->assertSame('na', $plan['aspiration']['used']);
+        $this->assertSame(['wish'], array_column($plan['proposals'], 'role'));
+        $this->assertSame(60.0, $this->proposal($plan, 'wish')['after']['max']);
     }
 
     /**

@@ -95,7 +95,7 @@ function render() {
     const label = props.modifiedLabel.toLowerCase();
     const line = (curve, key, name, color, dashed, yaxis) => ({
         type: 'scatter', mode: 'lines', x: curve.rpm, y: curve[key], name, yaxis,
-        line: { color, width: dashed ? 1.5 : 2.5, dash: dashed ? 'dot' : 'solid', shape: 'spline' },
+        line: { color, width: dashed ? 1.5 : 2.5, dash: dashed ? 'dot' : 'solid', shape: 'spline', smoothing: 0.5 },
         hovertemplate: `%{y:.0f} ${key === 'power' ? 'PS' : 'Nm'}<extra>${name}</extra>`,
     });
     const traces = [
@@ -109,6 +109,7 @@ function render() {
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#e6edf3', size: 11 },
+        hoverlabel: { bgcolor: '#1c2430', bordercolor: '#2a3442', font: { color: '#e6edf3', size: 11 } },
         margin: { l: 55, r: 60, t: 50, b: 50 },
         hovermode: 'x unified',
         legend: { orientation: 'h', x: 0, y: 1, yanchor: 'bottom' },

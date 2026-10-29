@@ -18,7 +18,7 @@ class MapRoles
 {
     public const DIESEL = ['wish', 'torqueLimit', 'fullLoadLimit', 'smoke', 'boost', 'boostLimit', 'duration'];
 
-    public const PETROL = ['ldrxn', 'kfmirl'];
+    public const PETROL = ['ldrxn', 'kfmirl', 'pedal'];
 
     /** Override value that switches a role off. */
     public const NONE = 'none';
@@ -38,6 +38,7 @@ class MapRoles
         'duration' => ['name' => '/injection duration|ansteuerdauer|energizing/i', 'unit' => null, 'other' => []],
         'ldrxn' => ['name' => '/^LDRXN$/i', 'unit' => 'load', 'other' => ['none']],
         'kfmirl' => ['name' => '/^KFMIRL$/i', 'unit' => 'load', 'other' => ['any']],
+        'pedal' => ['name' => '/^KFPED\b(?!R)|pedal map|pedal characteristic|fahrpedal.?kennfeld/i', 'unit' => 'load', 'other' => ['pedal']],
     ];
 
     /** Maps of a special function, diagnosis or correction that only look like a role by name. */
@@ -65,6 +66,32 @@ class MapRoles
         'fuel' => '/mm\^?3|mm³|mg|quantity|menge|\bIQ\b|\bmi\b/i',
         'pressure' => '/hpa|mbar|\bbar\b|kpa|atm|pressure|druck/i',
     ];
+
+    /** Names of maps that only exist on charged engines. */
+    private const CHARGING = '/boost|ladedruck|turbo|wastegate|\bN75\b|KFLDRL|KFLDIMX|LDRPID|\bVTG\b/i';
+
+    /**
+     * Whether the engine is turbocharged, judged from the file: boost control maps, or an ME7 load
+     * ceiling (LDRXN) well above what a naturally aspirated engine can fill. Null when unclear.
+     *
+     * @param  MapDef[]  $maps
+     */
+    public static function isTurbo(array $maps, Bin $bin, bool $diesel): ?bool
+    {
+        if (! $diesel) {
+            $ldrxn = self::candidates($maps, $bin, 'ldrxn')[0] ?? null;
+            if ($ldrxn !== null) {
+                return max(array_merge(...(new MapValues($ldrxn, $bin))->grid)) > 120;
+            }
+        }
+        foreach ($maps as $map) {
+            if (preg_match(self::CHARGING, $map->name) && ! preg_match(self::EXCLUDED, $map->name)) {
+                return true;
+            }
+        }
+
+        return $diesel ? false : null;
+    }
 
     /**
      * Picks the best usable map for each role.
