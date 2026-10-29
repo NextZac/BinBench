@@ -41,8 +41,8 @@ class DynoEstimatorTest extends TestCase
         $at2000 = array_search(2000, $stock['rpm'], true);
         $this->assertSame(50.0, $stock['fuel'][$at2000]);
         $this->assertSame('Torque limiter', $stock['limiter'][$at2000]);
-        // 50 mg x 4 cylinders x 42.6 MJ/kg x 0.44 efficiency / 4π
-        $this->assertEqualsWithDelta(298.3, $stock['torque'][$at2000], 0.5);
+        // 50 mg x 4 cylinders x 42.6 MJ/kg x 0.40 efficiency / 4π
+        $this->assertEqualsWithDelta(271.2, $stock['torque'][$at2000], 0.5);
         $this->assertSame(1000, $stock['rpm'][0]);
         $this->assertSame(4500, end($stock['rpm']));
     }
@@ -75,7 +75,7 @@ class DynoEstimatorTest extends TestCase
         $at2000 = array_search(2000, $result['stock']['rpm'], true);
         $this->assertSame('Smoke limiter', $result['stock']['limiter'][$at2000]);
         $this->assertEqualsWithDelta(38.8, $result['stock']['fuel'][$at2000], 0.2);
-        $this->assertSame('Smoke limiter (air mass)', $result['maps']['smoke']['name']);
+        $this->assertSame('Smoke limiter (air mass)', $result['roles']['smoke']['name']);
     }
 
     public function test_stock_power_calibrates_both_curves(): void

@@ -112,7 +112,7 @@ class EcuFileController extends Controller
     {
         $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
 
-        return response()->json((new DynoEstimator)->estimate($maps, $request->engineSpec(), $file->bin(), $request->buffer()));
+        return response()->json((new DynoEstimator)->estimate($maps, $request->engineSpec(), $file->bin(), $request->buffer(), $request->roleOverrides()));
     }
 
     /**

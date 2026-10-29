@@ -60,6 +60,20 @@ class TuningApiTest extends TestCase
         $this->assertStringNotContainsString('"values"', $prompt);
     }
 
+    public function test_role_overrides_change_the_proposal(): void
+    {
+        $roles = $this->postJson(route('files.stage1', $this->fileId))->json('roles');
+        $this->assertNotNull($roles['smoke']['id']);
+
+        $response = $this->postJson(route('files.stage1', [$this->fileId, 'roles' => ['smoke' => 'none']]));
+
+        $response->assertOk()
+            ->assertJsonPath('roles.smoke.id', null)
+            ->assertJsonPath('roles.smoke.overridden', true);
+        $this->assertNotContains('smoke', array_column($response->json('proposals'), 'role'));
+        $this->assertStringContainsString('No smoke limiter found', implode(' ', $response->json('warnings')));
+    }
+
     public function test_rejects_aggressive_options(): void
     {
         $this->postJson(route('files.stage1', [$this->fileId, 'fuel_increase' => 90]))

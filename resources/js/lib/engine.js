@@ -1,16 +1,16 @@
 import { reactive, watch } from 'vue';
 
-// Engine data for the dyno estimate, remembered per file in this browser.
+// Engine data and per-role map choices for the dyno and Stage 1, remembered per file in this browser.
 export function useEngineInputs(fileId) {
     const key = `binbench.dyno.${fileId}`;
-    const defaults = { displacement: null, cylinders: null, stockPower: null };
+    const defaults = { displacement: null, cylinders: null, stockPower: null, roles: {} };
     let stored = {};
     try {
         stored = JSON.parse(localStorage.getItem(key) ?? '{}');
     } catch {
         // storage unavailable or corrupt: start empty
     }
-    const engine = reactive({ ...defaults, ...stored });
+    const engine = reactive({ ...defaults, ...stored, roles: { ...(stored.roles ?? {}) } });
 
     watch(engine, () => {
         try {
@@ -24,6 +24,7 @@ export function useEngineInputs(fileId) {
         displacement: engine.displacement,
         cylinders: engine.cylinders,
         stock_power: engine.stockPower,
+        ...Object.fromEntries(Object.entries(engine.roles).filter(([, id]) => id).map(([role, id]) => [`roles[${role}]`, id])),
     });
 
     return { engine, params };

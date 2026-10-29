@@ -82,6 +82,6 @@ class TuningController extends Controller
         $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
         $original = $file->bin();
 
-        return (new Stage1Planner)->plan($maps, $request->engineSpec(), $original, $request->buffer() ?? $original, Stage1Options::fromArray($options));
+        return (new Stage1Planner)->plan($maps, $request->engineSpec(), $original, $request->buffer() ?? $original, Stage1Options::fromArray($options), $request->roleOverrides());
     }
 }

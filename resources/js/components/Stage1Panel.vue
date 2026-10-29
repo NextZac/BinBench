@@ -16,8 +16,15 @@
             <button class="btn btn-primary ml-auto" :disabled="loading" @click="generate">{{ loading ? 'Working…' : 'Generate proposal' }}</button>
         </div>
 
+        <div v-if="result?.roles" class="border-b border-line px-3 py-2">
+            <RolePicker :roles="result.roles" :choices="engine.roles" />
+        </div>
+
         <div v-if="error" class="p-6 text-center text-xs text-bad">{{ error }}</div>
-        <div v-else-if="result && !result.available" class="p-6 text-center text-xs text-muted">{{ result.reason }}</div>
+        <div v-else-if="result && !result.available" class="space-y-1.5 p-6 text-center text-xs text-muted">
+            <div>{{ result.reason }}</div>
+            <div v-for="w in result.warnings" :key="w" class="text-yellow-200">{{ w }}</div>
+        </div>
         <div v-else-if="!result" class="p-6 text-center text-xs text-muted">Calculating…</div>
 
         <template v-else>
@@ -28,7 +35,7 @@
                     <input v-model="selected[p.mapId]" type="checkbox" class="mt-0.5" :aria-label="`Include ${p.name}`">
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
-                            <button class="font-semibold hover:text-accent" @click="ed.selectedId = p.mapId">{{ p.name }}</button>
+                            <button class="text-left font-semibold hover:text-accent" @click="ed.selectedId = p.mapId">{{ p.name }}</button>
                             <span class="font-mono text-[11px] text-muted">{{ range(p.before, p.unit) }} → <span class="text-accent">{{ range(p.after, p.unit) }}</span></span>
                             <span class="ml-auto text-[11px] text-muted">{{ p.changedCells }} cells</span>
                         </div>
@@ -80,7 +87,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { api } from '../lib/api';
 import { writeCell } from '../lib/binary';
 import { useEngineInputs } from '../lib/engine';
@@ -88,6 +95,7 @@ import { toast } from '../lib/toast';
 import { useEditor } from '../stores/editor';
 import DynoChart from './DynoChart.vue';
 import EngineInputs from './EngineInputs.vue';
+import RolePicker from './RolePicker.vue';
 
 const ed = useEditor();
 const { engine, params } = useEngineInputs(ed.file.id);
@@ -198,5 +206,7 @@ async function copyPrompt() {
     setTimeout(() => (copied.value = false), 2000);
 }
 
+// a different map choice means a different proposal
+watch(() => JSON.stringify(engine.roles), generate);
 onMounted(generate);
 </script>
