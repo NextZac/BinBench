@@ -78,6 +78,8 @@ class TuningController extends Controller
             'load_increase' => ['nullable', 'numeric', 'between:0,40'],
             'max_load' => ['nullable', 'numeric', 'between:50,250'],
             'max_torque' => ['nullable', 'numeric', 'between:50,2000'],
+            'response_increase' => ['nullable', 'numeric', 'between:0,40'],
+            'aspiration' => ['nullable', 'in:auto,turbo,na'],
         ]);
         $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
         $original = $file->bin();

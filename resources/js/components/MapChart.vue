@@ -28,6 +28,7 @@ function render() {
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
         font: { color: '#e6edf3', size: 11 },
+        hoverlabel: { bgcolor: '#1c2430', bordercolor: '#2a3442', font: { color: '#e6edf3', size: 11 } },
         margin: { l: 50, r: 20, t: 20, b: 40 },
         showlegend: changed,
         legend: { x: 0, y: 1 },

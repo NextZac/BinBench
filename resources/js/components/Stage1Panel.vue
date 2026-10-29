@@ -10,6 +10,13 @@
 
         <!-- limits -->
         <div class="flex flex-wrap items-end gap-3 border-b border-line px-3 py-2 text-xs">
+            <label title="Turbo: raise fuel/boost or load. N/A: shape the pedal map for a livelier throttle instead, since a naturally aspirated engine cannot take much more air.">Engine
+                <select v-model="options.aspiration" class="input mt-1 block py-1.5" @change="generate">
+                    <option value="auto">Auto ({{ detectedLabel }})</option>
+                    <option value="turbo">Turbo</option>
+                    <option value="na">Naturally aspirated</option>
+                </select>
+            </label>
             <label v-for="f in fields" :key="f.key" :title="f.hint">{{ f.label }}
                 <input v-model.number="options[f.key]" type="number" :step="f.step ?? 1" :min="f.min" :max="f.max" :placeholder="f.placeholder ?? ''" class="input mt-1 block w-24">
             </label>
@@ -100,10 +107,17 @@ import RolePicker from './RolePicker.vue';
 const ed = useEditor();
 const { engine, params } = useEngineInputs(ed.file.id);
 const diesel = (ed.file.ident?.fuel ?? '') === 'Diesel' || (ed.file.family_id ?? '').startsWith('edc');
-const options = reactive(diesel
-    ? { fuel_increase: 15, boost_increase: 8, max_boost: 2600, max_fuel: null, max_torque: null }
-    : { load_increase: 10, max_load: 180, max_torque: null });
-const fields = diesel
+const options = reactive({
+    aspiration: 'auto',
+    response_increase: 15,
+    ...(diesel
+        ? { fuel_increase: 15, boost_increase: 8, max_boost: 2600, max_fuel: null, max_torque: null }
+        : { load_increase: 10, max_load: 180, max_torque: null }),
+});
+const responseFields = [
+    { key: 'response_increase', label: 'Response +%', min: 0, max: 40, hint: 'Extra torque request around 30 % pedal; full pedal stays the same' },
+];
+const chargedFields = diesel
     ? [
         { key: 'fuel_increase', label: 'Fuel +%', min: 0, max: 40, hint: 'Increase of the fuel limits at full load' },
         { key: 'boost_increase', label: 'Boost +%', min: 0, max: 25, hint: 'Increase of the boost target at high fuel quantity' },
@@ -116,6 +130,9 @@ const fields = diesel
         { key: 'max_load', label: 'Max load (%)', min: 50, max: 250, hint: 'Absolute load cap. Stock MAP sensors read up to about 2.5 bar.' },
         { key: 'max_torque', label: 'Max torque (Nm)', min: 50, max: 2000, placeholder: 'none', hint: 'Clutch or gearbox limit; warns when the estimate exceeds it' },
     ];
+const naturallyAspirated = computed(() => (result.value?.aspiration?.used ?? (options.aspiration === 'na' ? 'na' : 'turbo')) === 'na');
+const fields = computed(() => (naturallyAspirated.value ? responseFields : chargedFields));
+const detectedLabel = computed(() => ({ turbo: 'turbo', na: 'N/A' })[result.value?.aspiration?.detected] ?? 'unclear');
 
 const result = ref(null);
 const error = ref(null);

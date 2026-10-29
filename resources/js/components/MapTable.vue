@@ -16,10 +16,11 @@
             <button class="btn btn-sm" title="Decrease by %" @click="apply('-pct')">−%</button>
             <button class="btn btn-sm" title="Multiply" @click="apply('mul')">×</button>
             <span class="mx-1 h-5 w-px bg-line" />
-            <button class="btn btn-sm" title="Interpolate horizontally between selection edges" @click="interpolate('h')">Interp ↔</button>
-            <button class="btn btn-sm" title="Interpolate vertically" @click="interpolate('v')">Interp ↕</button>
-            <button class="btn btn-sm" title="Bilinear fill from selection corners" @click="interpolate('b')">Interp ⊞</button>
-            <button class="btn btn-sm" title="Smooth selection (3×3 average)" @click="smooth">Smooth</button>
+            <button class="btn btn-sm" title="Interpolate between the left and right edge of the selection, spaced by the axis values" @click="interpolate('h')">Interp ↔</button>
+            <button class="btn btn-sm" title="Interpolate between the top and bottom edge of the selection, spaced by the axis values" @click="interpolate('v')">Interp ↕</button>
+            <button class="btn btn-sm" title="Bilinear fill from the selection corners, spaced by the axis values" @click="interpolate('b')">Interp ⊞</button>
+            <button class="btn btn-sm" title="Smooth the selected values (Gaussian, by axis distance). The selection edge stays put. Shift-click: stronger" @click="smooth($event)">Smooth</button>
+            <button class="btn btn-sm" title="Smooth only your changes against the original: keeps the stock shape, evens out steps and feathers the edges. Shift-click: stronger" @click="smoothDelta($event)">Smooth Δ</button>
             <button class="btn btn-sm" title="Restore selection from original" @click="restoreSelection">Restore</button>
             <span class="ml-auto text-[11px] text-muted">
                 {{ selCount }} selected<span v-if="selStats"> · min {{ selStats.min }} · max {{ selStats.max }} · avg {{ selStats.avg }}</span>
@@ -68,6 +69,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fmt, readAxis, readCell, readGrid, writeCell } from '../lib/binary';
+import { interpolateCell, smoothChanges, smoothValues } from '../lib/smoothing';
 import { useEditor } from '../stores/editor';
 
 const props = defineProps({ map: { type: Object, required: true } });
@@ -235,35 +237,19 @@ function nudge(dir) {
 }
 
 function interpolate(mode) {
-    const { r0, r1, c0, c1 } = box.value;
-    const g = grid.value;
-    mutate((v, r, c) => {
-        const tr = r1 > r0 ? (r - r0) / (r1 - r0) : 0;
-        const tc = c1 > c0 ? (c - c0) / (c1 - c0) : 0;
-        if (mode === 'h') return c1 > c0 ? g[r][c0] + (g[r][c1] - g[r][c0]) * tc : v;
-        if (mode === 'v') return r1 > r0 ? g[r0][c] + (g[r1][c] - g[r0][c]) * tr : v;
-        const top = g[r0][c0] + (g[r0][c1] - g[r0][c0]) * tc;
-        const bot = g[r1][c0] + (g[r1][c1] - g[r1][c0]) * tc;
-        return top + (bot - top) * tr;
-    });
+    const g = grid.value.map((row) => row.slice());
+    const b = { ...box.value };
+    mutate((v, r, c) => interpolateCell(g, b, xAxis.value, yAxis.value, mode, r, c));
 }
 
-function smooth() {
-    const g = grid.value.map((row) => row.slice());
-    mutate((v, r, c) => {
-        let sum = 0;
-        let n = 0;
-        for (let dr = -1; dr <= 1; dr++) {
-            for (let dc = -1; dc <= 1; dc++) {
-                const x = g[r + dr]?.[c + dc];
-                if (Number.isFinite(x)) {
-                    sum += x;
-                    n++;
-                }
-            }
-        }
-        return sum / n;
-    });
+function smooth(e) {
+    const valueAt = smoothValues(grid.value.map((row) => row.slice()), { ...box.value }, xAxis.value, yAxis.value, e?.shiftKey ? 5 : 2);
+    mutate((v, r, c) => valueAt(r, c));
+}
+
+function smoothDelta(e) {
+    const valueAt = smoothChanges(grid.value.map((row) => row.slice()), origGrid.value, xAxis.value, yAxis.value, e?.shiftKey ? 5 : 2);
+    mutate((v, r, c) => valueAt(r, c));
 }
 
 function restoreSelection() {
