@@ -98,6 +98,79 @@ class TuningApiTest extends TestCase
         $this->assertContains("Driver's wish caps the raised torque limit", array_column($response->json('review.findings'), 'title'));
     }
 
+    public function test_diff_compares_another_uploaded_file(): void
+    {
+        $tuned = substr_replace(EcuFile::find($this->fileId)->bin()->data, pack('v*', 9000, 9000), 0x63000 + (2 + 5 + 8) * 2, 4);
+        $otherId = $this->uploadFile('tdi_tuned.bin', $tuned);
+
+        $this->postJson(route('files.diff', [$this->fileId, 'target' => "file:{$otherId}"]))
+            ->assertOk()
+            ->assertJsonPath('base.label', 'Original')
+            ->assertJsonPath('target.label', 'tdi_tuned')
+            ->assertJsonPath('swMismatch', false)
+            ->assertJsonPath('maps.0.name', 'Boost pressure target')
+            ->assertJsonPath('maps.0.changedCells', 2);
+
+        // and the other way round: the tuned file as the base, the original as the target
+        $this->postJson(route('files.diff', [$this->fileId, 'base' => "file:{$otherId}", 'target' => 'original']))
+            ->assertOk()
+            ->assertJsonPath('base.label', 'tdi_tuned')
+            ->assertJsonPath('maps.0.changedCells', 2);
+    }
+
+    public function test_diff_compares_a_saved_version_with_another_file(): void
+    {
+        $file = EcuFile::find($this->fileId);
+        $modified = substr_replace($file->bin()->data, pack('v', 9000), 0x63000 + (2 + 5 + 8) * 2, 2);
+        $versionId = $this->postJson(route('files.versions.store', $file), [
+            'file' => UploadedFile::fake()->createWithContent('m.bin', $modified),
+            'label' => 'Stage 1',
+        ])->assertCreated()->json('id');
+        $otherId = $this->uploadFile('copy.bin', $file->bin()->data);
+
+        $this->postJson(route('files.diff', [$this->fileId, 'base' => "file:{$otherId}", 'target' => "version:{$versionId}"]))
+            ->assertOk()
+            ->assertJsonPath('target.label', 'Stage 1')
+            ->assertJsonPath('changedBytes', 2);
+    }
+
+    public function test_diff_can_use_the_working_buffer_as_the_base(): void
+    {
+        $original = EcuFile::find($this->fileId)->bin()->data;
+        $otherId = $this->uploadFile('tuned.bin', substr_replace($original, pack('v', 9000), 0x63000 + (2 + 5 + 8) * 2, 2));
+        $edited = substr_replace($original, pack('v*', 9000, 9000), 0x63000 + (2 + 5 + 8) * 2, 4);
+
+        $response = $this->call('POST', route('files.diff', [$this->fileId, 'target' => "file:{$otherId}", 'buffer_side' => 'base']), [], [], [],
+            ['CONTENT_TYPE' => 'application/octet-stream', 'HTTP_ACCEPT' => 'application/json'], $edited);
+
+        $response->assertOk()
+            ->assertJsonPath('base.label', 'Current edits')
+            ->assertJsonPath('target.label', 'tuned')
+            ->assertJsonPath('changedBytes', 2);
+    }
+
+    public function test_diff_rejects_files_of_other_users_and_other_sizes(): void
+    {
+        $smallId = $this->uploadFile('small.bin', str_repeat("\xFF", 0x40000));
+
+        $this->actingAs(User::factory()->create());
+        $foreignId = $this->uploadFile('foreign.bin', EcuFile::find($this->fileId)->bin()->data);
+        $this->actingAs(EcuFile::find($this->fileId)->user);
+
+        $this->postJson(route('files.diff', [$this->fileId, 'target' => "file:{$foreignId}"]))
+            ->assertUnprocessable()->assertJsonValidationErrors('target');
+        $this->postJson(route('files.diff', [$this->fileId, 'base' => "file:{$smallId}"]))
+            ->assertUnprocessable()->assertJsonValidationErrors('base');
+        $this->postJson(route('files.diff', [$this->fileId, 'base' => 'version:999']))
+            ->assertUnprocessable()->assertJsonValidationErrors('base');
+    }
+
+    private function uploadFile(string $name, string $data): int
+    {
+        return $this->postJson(route('files.store'), ['file' => UploadedFile::fake()->createWithContent($name, $data)])
+            ->assertCreated()->json('id');
+    }
+
     public function test_diff_without_changes_has_no_verdict(): void
     {
         $this->postJson(route('files.diff', $this->fileId))

@@ -2,8 +2,10 @@
 
 namespace App\Models;
 
+use App\Ecu\Bin;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\Storage;
 
 class EcuFileVersion extends Model
 {
@@ -24,5 +26,10 @@ class EcuFileVersion extends Model
     public function ecuFile(): BelongsTo
     {
         return $this->belongsTo(EcuFile::class);
+    }
+
+    public function bin(): Bin
+    {
+        return new Bin(Storage::disk('local')->get($this->path));
     }
 }
