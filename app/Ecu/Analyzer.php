@@ -8,6 +8,7 @@ use App\Ecu\Families\Edc15Family;
 use App\Ecu\Families\Edc16Family;
 use App\Ecu\Families\Edc17Family;
 use App\Ecu\Families\GenericFamily;
+use App\Ecu\Families\Me9Family;
 use App\Ecu\Maps\MapDef;
 
 /**
@@ -22,6 +23,7 @@ class Analyzer
     {
         $classes = [
             'App\\Ecu\\Families\\Me7Family',
+            Me9Family::class,
             Edc15Family::class,
             Edc16Family::class,
             Edc17Family::class,
