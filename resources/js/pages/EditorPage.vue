@@ -43,6 +43,7 @@
                 <DynoPanel v-if="mainView === 'dyno'" />
                 <Stage1Panel v-else-if="mainView === 'stage1'" />
                 <DiffPanel v-else-if="mainView === 'diff'" :version-id="diffVersion" />
+                <FaultsPanel v-else-if="mainView === 'faults'" />
                 <template v-else-if="map">
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5">
                         <div class="min-w-[14rem] flex-1">
@@ -171,7 +172,8 @@
                 <template v-else>n/a</template>
             </span>
             <span v-if="ed.changedMapIds.size" class="text-mod">{{ ed.changedMapIds.size }} map{{ ed.changedMapIds.size === 1 ? '' : 's' }} edited · {{ diffBytes }} B</span>
-            <span v-else>no edits</span>
+            <span v-else-if="!ed.changedFaultCodes.length">no edits</span>
+            <span v-if="ed.changedFaultCodes.length" class="text-mod">{{ ed.changedFaultCodes.length }} fault path{{ ed.changedFaultCodes.length === 1 ? '' : 's' }} changed</span>
             <span v-if="ed.reference" class="text-ref">vs {{ ed.refLabel }}</span>
             <span class="ml-auto">{{ ed.maps.length }} maps · {{ (ed.file.size / 1024).toFixed(0) }} KB · {{ ident.endian === 'be' ? 'big' : 'little' }}-endian</span>
         </footer>
@@ -193,6 +195,10 @@
                     <div>
                         <div class="label">Edited maps</div>
                         <p class="mt-0.5 max-h-24 overflow-y-auto text-muted scroll-thin">{{ changedNames.join(', ') || 'none' }}</p>
+                    </div>
+                    <div v-if="ed.changedFaultCodes.length">
+                        <div class="label">Changed fault paths</div>
+                        <p class="mt-0.5 max-h-24 overflow-y-auto font-mono text-muted scroll-thin">{{ ed.changedFaultCodes.join(' ') }}</p>
                     </div>
                 </div>
                 <div class="flex justify-end gap-2 border-t border-line px-4 py-2.5">
@@ -222,13 +228,14 @@ const MapChart = defineAsyncComponent(() => import('../components/MapChart.vue')
 const DynoPanel = defineAsyncComponent(() => import('../components/DynoPanel.vue'));
 const Stage1Panel = defineAsyncComponent(() => import('../components/Stage1Panel.vue'));
 const DiffPanel = defineAsyncComponent(() => import('../components/DiffPanel.vue'));
+const FaultsPanel = defineAsyncComponent(() => import('../components/FaultsPanel.vue'));
 
 const props = defineProps({ id: { type: String, required: true } });
 const ed = useEditor();
 const loading = ref(true);
 const views = ['Table', 'Split', '3D', 'Hex'];
 const view = ref('Split');
-const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }, { id: 'diff', label: 'Diff' }];
+const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }, { id: 'diff', label: 'Diff' }, { id: 'faults', label: 'Faults' }];
 const mainView = ref('maps');
 const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
@@ -311,7 +318,7 @@ async function saveVersion() {
         const version = await api.saveVersion(ed.file.id, ed.current, {
             label: saveLabel.value,
             fix: fixChecksum.value && checksum.value?.canFix,
-            changedMaps: changedNames.value,
+            changedMaps: [...changedNames.value, ...ed.changedFaultCodes.map((c) => `DTC ${c}`)],
         });
         saveDialog.value = false;
         toast(`Saved "${version.label}"${version.checksum_fixed ? ' with corrected checksums' : ''}`);

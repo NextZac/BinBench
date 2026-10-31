@@ -19,6 +19,8 @@ export const useEditor = defineStore('editor', {
         // other files of the same size the user can compare with
         compareFiles: [],
         liveChecksum: null,
+        // fault paths of the original file (null until the Faults view loads them)
+        dtc: null,
     }),
 
     getters: {
@@ -43,6 +45,16 @@ export const useEditor = defineStore('editor', {
                 return bytesDiffer(s.reference.bytes, s.current, a, b);
             }).map((m) => m.id));
         },
+        // P-codes of fault paths whose bytes differ from the original
+        changedFaultCodes(s) {
+            void s.revision;
+            if (!s.dtc?.available || !s.current) return [];
+            const size = s.dtc.codeSize;
+            const differs = (address, n) => bytesDiffer(s.original, s.current, address, address + n);
+            return s.dtc.paths
+                .filter((p) => p.codes.some((c) => differs(c.address, size)) || p.fields.some((f) => differs(f.address, f.size)))
+                .map((p) => p.codes.find((c) => c.value && c.value !== 0xffff)?.code ?? `path ${p.index}`);
+        },
         refBytes: (s) => s.reference?.bytes ?? s.original,
         refLabel: (s) => s.reference?.label ?? 'Original',
         dirty(s) {
@@ -60,6 +72,11 @@ export const useEditor = defineStore('editor', {
             this.current = raw.slice();
             const firstGood = file.maps.find((m) => m.kind === 'map' && m.confidence >= 0.7) ?? file.maps[0];
             this.selectedId = firstGood?.id ?? null;
+        },
+
+        async loadDtcs() {
+            this.dtc = await api.dtcs(this.file.id);
+            return this.dtc;
         },
 
         async loadCompareFiles() {
@@ -108,7 +125,13 @@ export const useEditor = defineStore('editor', {
          * Apply a batch of byte writes as one undo step. `fn(buf)` mutates the buffer.
          */
         transact(map, fn) {
-            const [a, b] = mapRange(map);
+            this.transactRange(...mapRange(map), fn);
+        },
+
+        /**
+         * Like transact, for any byte range [a, b) (fault paths, raw patches).
+         */
+        transactRange(a, b, fn) {
             const before = this.current.slice(a, b);
             fn(this.current);
             const after = this.current.slice(a, b);

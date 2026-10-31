@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
+use App\Ecu\Dtc\DtcService;
 use App\Ecu\Dyno\DynoEstimator;
 use App\Ecu\Maps\MapDef;
 use App\Ecu\Xdf\XdfExporter;
@@ -129,6 +130,15 @@ class EcuFileController extends Controller
         $bin = new Bin($request->file('file')->getContent());
         if ($bin->size !== $file->size) {
             return response()->json(['message' => 'Modified file size differs from the original.'], 422);
+        }
+
+        $dtc = new DtcService;
+        $original = $file->bin();
+        $protected = $dtc->protectedChanges($original, $bin, $dtc->table($original, (string) $file->family_id), (string) $file->family_id);
+        if ($protected) {
+            return response()->json([
+                'message' => 'Emissions-related fault paths were changed ('.implode(', ', array_slice($protected, 0, 8)).'). BinBench does not save files with emissions monitoring switched off.',
+            ], 422);
         }
 
         $analyzer = new Analyzer;

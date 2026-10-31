@@ -165,6 +165,17 @@ class TuningApiTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors('base');
     }
 
+    public function test_fault_codes_are_owner_only_and_unavailable_without_known_tables(): void
+    {
+        $this->getJson(route('files.dtcs', $this->fileId))
+            ->assertOk()
+            ->assertJsonPath('available', false)
+            ->assertJsonPath('paths', []);
+
+        $this->actingAs(User::factory()->create());
+        $this->getJson(route('files.dtcs', $this->fileId))->assertForbidden();
+    }
+
     private function uploadFile(string $name, string $data): int
     {
         return $this->postJson(route('files.store'), ['file' => UploadedFile::fake()->createWithContent($name, $data)])
