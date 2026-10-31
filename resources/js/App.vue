@@ -1,14 +1,23 @@
 <template>
     <div class="flex h-full flex-col">
-        <header class="flex h-11 shrink-0 items-center gap-4 border-b border-line bg-panel px-4">
-            <router-link to="/" class="flex items-center gap-2 font-semibold tracking-tight">
-                <span class="grid h-6 w-6 place-items-center rounded bg-accent text-[11px] font-bold text-black">BB</span>
-                <span>BinBench</span>
+        <header class="flex h-10 shrink-0 items-center gap-5 border-b border-line bg-panel px-3">
+            <router-link to="/" class="flex items-center gap-2 text-[14px] font-semibold tracking-[-0.01em] text-ink">
+                <BrandMark />
+                BinBench
             </router-link>
-            <span class="hidden text-xs text-muted sm:inline">ECU identification · map finder · editor · checksums</span>
-            <div v-if="auth.user" class="ml-auto flex items-center gap-2 text-xs">
-                <span class="text-muted" :title="auth.user.email">{{ auth.user.name }}</span>
-                <button class="btn btn-sm" @click="logout">Sign out</button>
+            <nav v-if="auth.user" class="flex h-full items-stretch">
+                <router-link to="/" class="tab" :aria-selected="$route.name === 'files' || $route.name === 'editor'">Files</router-link>
+            </nav>
+            <div class="ml-auto flex items-center gap-1">
+                <button class="btn btn-quiet btn-icon" :aria-label="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'"
+                    :title="theme === 'dark' ? 'Light theme' : 'Dark theme'" @click="toggleTheme">
+                    <Icon :name="theme === 'dark' ? 'sun' : 'moon'" />
+                </button>
+                <template v-if="auth.user">
+                    <span class="mx-2 h-4 w-px bg-line" />
+                    <span class="text-[12px] text-muted" :title="auth.user.email">{{ auth.user.name }}</span>
+                    <button class="btn btn-quiet btn-sm" @click="logout">Sign out</button>
+                </template>
             </div>
         </header>
         <main class="min-h-0 flex-1">
@@ -20,7 +29,10 @@
 
 <script setup>
 import { useRouter } from 'vue-router';
+import BrandMark from './components/BrandMark.vue';
+import Icon from './components/Icon.vue';
 import Toasts from './components/Toasts.vue';
+import { theme, toggleTheme } from './lib/theme';
 import { toastError } from './lib/toast';
 import { useAuth } from './stores/auth';
 
