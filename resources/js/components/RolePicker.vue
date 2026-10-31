@@ -13,7 +13,7 @@
                     <option value="none">None (ignore this role)</option>
                     <option value="__other">Other map…</option>
                 </select>
-                <button class="btn btn-sm" :disabled="!row.id" title="Open this map" @click="ed.selectedId = row.id">↗</button>
+                <button class="btn btn-sm btn-icon" :disabled="!row.id" aria-label="Open this map" title="Open this map" @click="ed.selectedId = row.id"><Icon name="open" :size="12" /></button>
             </div>
         </div>
         <div v-if="otherRole" class="mt-1.5 flex items-center gap-1.5">
@@ -31,6 +31,7 @@
 import { computed, ref } from 'vue';
 import { toastError } from '../lib/toast';
 import { useEditor } from '../stores/editor';
+import Icon from './Icon.vue';
 
 // roles: result.roles from the API; choices: reactive role => map id ('none' switches it off).
 const props = defineProps({

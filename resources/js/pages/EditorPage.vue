@@ -1,185 +1,203 @@
 <template>
-    <div v-if="loading" class="grid h-full place-items-center text-muted">Loading…</div>
+    <div v-if="loading" class="grid h-full place-items-center font-mono text-[12px] text-muted">Loading read…</div>
     <div v-else-if="ed.file" class="flex h-full flex-col">
-        <!-- file header -->
-        <div class="flex flex-wrap items-center gap-3 border-b border-line bg-panel px-4 py-2">
-            <div class="min-w-0">
-                <div class="truncate font-semibold">{{ ed.file.name }}</div>
-                <div class="flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
-                    <span class="chip bg-accent/15 text-accent">{{ ed.file.family || 'Unknown ECU' }}</span>
-                    <span v-if="ident.sw" class="font-mono">SW {{ ident.sw }}</span>
-                    <span v-if="ident.hw" class="font-mono">· HW {{ ident.hw }}</span>
-                    <span v-if="ident.partNumber" class="font-mono">· {{ ident.partNumber }}</span>
-                    <span v-if="ident.swVersion" class="font-mono">· {{ ident.swVersion }}</span>
-                    <span v-if="ident.engine">· {{ ident.engine }}</span>
-                    <span>· {{ (ed.file.size / 1024).toFixed(0) }} KB · {{ ed.maps.length }} maps</span>
+        <!-- file bar -->
+        <div class="flex h-10 shrink-0 items-stretch gap-3 border-b border-line bg-panel px-2">
+            <div class="flex min-w-0 items-center gap-1.5">
+                <router-link to="/" class="btn btn-quiet btn-icon" aria-label="Back to files"><Icon name="chevronLeft" /></router-link>
+                <div class="min-w-0 leading-tight">
+                    <div class="truncate text-[13px] font-medium" :title="ed.file.original_filename">{{ ed.file.name }}</div>
+                    <div class="truncate text-[11px] text-muted">{{ ed.file.family || 'ECU not recognised' }}<span v-if="ident.sw" class="font-mono"> · {{ ident.sw }}</span></div>
                 </div>
             </div>
-            <div class="ml-auto flex flex-wrap items-center gap-1.5">
-                <span v-if="ed.changedMapIds.size" class="text-[11px] text-accent">{{ ed.changedMapIds.size }} map(s) modified · {{ diffBytes }} bytes</span>
-                <button class="btn" :disabled="!ed.undoStack.length" title="Ctrl+Z" @click="ed.undo()">↶ Undo</button>
-                <button class="btn" :disabled="!ed.redoStack.length" title="Ctrl+Y" @click="ed.redo()">↷ Redo</button>
-                <span class="mx-1 h-5 w-px bg-line" />
-                <div class="flex overflow-hidden rounded-md border border-line">
-                    <button v-for="v in mainViews" :key="v.id" class="px-2.5 py-1.5 text-xs font-medium"
-                        :class="mainView === v.id ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
-                        @click="mainView = v.id">{{ v.label }}</button>
+            <nav class="ml-4 flex items-stretch" role="tablist" aria-label="Editor mode">
+                <button v-for="v in mainViews" :key="v.id" class="tab" role="tab" :aria-selected="mainView === v.id" @click="mainView = v.id">{{ v.label }}</button>
+            </nav>
+            <div class="ml-auto flex items-center gap-1">
+                <button class="btn btn-quiet btn-icon" :disabled="!ed.undoStack.length" aria-label="Undo" title="Undo (Ctrl+Z)" @click="ed.undo()"><Icon name="undo" /></button>
+                <button class="btn btn-quiet btn-icon" :disabled="!ed.redoStack.length" aria-label="Redo" title="Redo (Ctrl+Y)" @click="ed.redo()"><Icon name="redo" /></button>
+                <span class="mx-1 h-4 w-px bg-line" />
+                <div ref="fileMenuEl" class="relative">
+                    <button class="btn" :aria-expanded="fileMenu" aria-haspopup="menu" @click="fileMenu = !fileMenu">File <Icon name="chevronDown" :size="12" /></button>
+                    <div v-if="fileMenu" class="absolute right-0 z-40 mt-1 w-52 border border-line bg-panel py-1 text-[12px] shadow-[var(--bb-shadow)]" role="menu" @click="fileMenu = false">
+                        <button class="menu-item" role="menuitem" @click="$refs.xdfInput.click()"><Icon name="upload" :size="13" />Import XDF…</button>
+                        <a class="menu-item" role="menuitem" :href="`/api/files/${ed.file.id}/xdf`"><Icon name="download" :size="13" />Export XDF</a>
+                        <a class="menu-item" role="menuitem" :href="`/api/files/${ed.file.id}/raw`" :download="ed.file.original_filename"><Icon name="file" :size="13" />Download original</a>
+                        <div class="my-1 border-t border-line" />
+                        <button class="menu-item" role="menuitem" @click="reanalyze"><Icon name="reset" :size="13" />Re-run detection</button>
+                    </div>
                 </div>
-                <span class="mx-1 h-5 w-px bg-line" />
-                <button class="btn" @click="$refs.xdfInput.click()">Import XDF</button>
                 <input ref="xdfInput" type="file" accept=".xdf,.xml" class="hidden" @change="importXdf">
-                <a class="btn" :href="`/api/files/${ed.file.id}/xdf`">Export XDF</a>
-                <a class="btn" :href="`/api/files/${ed.file.id}/raw`" :download="ed.file.original_filename">Original</a>
-                <button class="btn btn-primary" @click="saveDialog = true">Save / Download…</button>
+                <button class="btn btn-primary" @click="saveDialog = true"><Icon name="download" :size="13" />Save…</button>
             </div>
         </div>
 
         <div class="flex min-h-0 flex-1">
             <!-- map list -->
-            <aside class="w-72 shrink-0 border-r border-line bg-panel">
+            <aside class="w-64 shrink-0 border-r border-line bg-panel" aria-label="Maps">
                 <MapList />
             </aside>
 
-            <!-- map area -->
+            <!-- main area -->
             <section class="flex min-w-0 flex-1 flex-col">
                 <DynoPanel v-if="mainView === 'dyno'" />
                 <Stage1Panel v-else-if="mainView === 'stage1'" />
                 <DiffPanel v-else-if="mainView === 'diff'" :version-id="diffVersion" />
                 <template v-else-if="map">
-                    <div class="flex items-center gap-3 border-b border-line px-3 py-2">
-                        <div class="min-w-0">
-                            <div class="truncate text-sm font-semibold">{{ map.name }}</div>
-                            <div class="truncate text-[11px] text-muted">{{ map.description }}</div>
-                        </div>
-                        <div class="ml-auto flex items-center gap-1.5">
-                            <span class="font-mono text-[11px] text-muted">{{ hex(map.address) }} · {{ map.rows }}×{{ map.cols }} · {{ map.unit || 'raw' }}</span>
-                            <div class="flex overflow-hidden rounded-md border border-line">
-                                <button v-for="v in views" :key="v" class="px-2.5 py-1 text-[11px]"
-                                    :class="view === v ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
-                                    @click="view = v">{{ v }}</button>
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5">
+                        <div class="min-w-[14rem] flex-1">
+                            <div class="flex items-baseline gap-2">
+                                <h2 class="truncate text-[14px] font-semibold">{{ map.name }}</h2>
+                                <span class="font-mono text-[11px] whitespace-nowrap text-muted">{{ hex(map.address) }} · {{ map.rows }}×{{ map.cols }} {{ map.dtype }} · {{ map.unit || 'raw' }}</span>
                             </div>
-                            <label class="flex items-center gap-1 text-[11px] text-muted" title="What the Original / Δ / Δ% views and the 3D overlay compare against">Compare
-                                <CompareSelect v-model="referenceKey" />
-                            </label>
-                            <span v-if="ed.reference?.sw && ed.reference.sw !== ed.file.sw" class="chip bg-warn/15 text-warn" title="Different software: map addresses may not line up">SW ≠</span>
-                            <button class="btn btn-sm" :disabled="!ed.changedMapIds.has(map.id)" @click="ed.resetMap(map)">Reset map</button>
+                            <div v-if="map.description" class="truncate text-[11px] text-muted" :title="map.description">{{ map.description }}</div>
                         </div>
+                        <div class="seg" role="group" aria-label="View">
+                            <button v-for="v in views" :key="v" :aria-pressed="view === v" @click="view = v">{{ v }}</button>
+                        </div>
+                        <label class="flex items-center gap-1.5 text-[11px] text-muted" title="What the Original / Δ / Δ% views and the 3D overlay compare against">
+                            vs
+                            <CompareSelect v-model="referenceKey" />
+                        </label>
+                        <span v-if="ed.reference?.sw && ed.reference.sw !== ed.file.sw" class="status text-warn" title="Different software: map addresses may not line up"><Icon name="alert" :size="12" />other SW</span>
+                        <button class="btn btn-quiet btn-sm" :disabled="!ed.changedMapIds.has(map.id)" title="Put this map back to the original" @click="ed.resetMap(map)"><Icon name="reset" :size="12" />Reset map</button>
                     </div>
-                    <div v-if="shownView === 'Table' || shownView === 'Split'" class="flex min-h-0 flex-col" :class="shownView === 'Split' ? 'h-1/2' : 'flex-1'">
-                        <MapTable :map="map" />
-                    </div>
-                    <div v-if="shownView === '3D' || shownView === 'Split'" class="min-h-0 border-t border-line" :class="shownView === 'Split' ? 'h-1/2' : 'flex-1'">
-                        <MapChart :map="map" />
-                    </div>
-                    <div v-if="shownView === 'Hex'" class="min-h-0 flex-1">
-                        <HexView :map="map" />
+                    <div class="grid min-h-0 flex-1" :class="shownView === 'Split' ? 'grid-rows-[minmax(0,1fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_minmax(320px,40%)] xl:grid-rows-1' : ''">
+                        <div v-if="shownView === 'Table' || shownView === 'Split'" class="flex min-h-0 min-w-0 flex-col">
+                            <MapTable :map="map" />
+                        </div>
+                        <div v-if="shownView === '3D' || shownView === 'Split'" class="min-h-0 min-w-0 border-line" :class="shownView === 'Split' ? 'border-t xl:border-t-0 xl:border-l' : ''">
+                            <MapChart :map="map" />
+                        </div>
+                        <div v-if="shownView === 'Hex'" class="min-h-0">
+                            <HexView :map="map" />
+                        </div>
                     </div>
                 </template>
-                <div v-else class="grid flex-1 place-items-center text-muted">Select a map</div>
+                <div v-else class="grid flex-1 place-items-center text-[12px] text-muted">Pick a map on the left.</div>
             </section>
 
             <!-- side panel -->
-            <aside class="flex w-80 shrink-0 flex-col border-l border-line bg-panel">
-                <div class="flex border-b border-line">
-                    <button v-for="t in sideTabs" :key="t" class="flex-1 py-2 text-[11px] font-medium"
-                        :class="side === t ? 'text-accent shadow-[inset_0_-2px_0_var(--color-accent)]' : 'text-muted'"
-                        @click="side = t">{{ t }}</button>
+            <aside class="flex w-72 shrink-0 flex-col border-l border-line bg-panel" aria-label="Details">
+                <div class="flex h-9 shrink-0 items-stretch border-b border-line px-1" role="tablist">
+                    <button v-for="t in sideTabs" :key="t" class="tab px-2" role="tab" :aria-selected="side === t" @click="side = t">{{ t }}</button>
                 </div>
                 <div class="min-h-0 flex-1 overflow-y-auto p-3 scroll-thin">
                     <!-- ECU -->
-                    <div v-if="side === 'ECU'" class="space-y-3 text-xs">
-                        <dl class="grid grid-cols-[90px_1fr] gap-x-2 gap-y-1">
+                    <div v-if="side === 'ECU'" class="space-y-4 text-[12px]">
+                        <dl class="grid grid-cols-[88px_1fr] gap-x-2 gap-y-1">
                             <template v-for="row in identRows" :key="row[0]">
                                 <dt class="text-muted">{{ row[0] }}</dt>
                                 <dd class="font-mono break-all">{{ row[1] }}</dd>
                             </template>
                         </dl>
-                        <div v-for="n in ident.notes ?? []" :key="n" class="rounded border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">{{ n }}</div>
-                        <div>
-                            <div class="mb-1 font-semibold">Map sources</div>
-                            <div v-for="(n, src) in sourceCounts" :key="src" class="flex justify-between text-muted"><span>{{ sourceLabel[src] ?? src }}</span><span class="font-mono">{{ n }}</span></div>
+                        <div v-if="ident.notes?.length" class="space-y-1.5">
+                            <p v-for="n in ident.notes" :key="n" class="note break-words">{{ n }}</p>
                         </div>
                         <div>
-                            <div class="mb-1 font-semibold">Definitions for this SW</div>
-                            <div v-for="d in ed.file.definitions" :key="d.id" class="text-muted">{{ d.name }} ({{ d.map_count }})</div>
-                            <div v-if="!ed.file.definitions?.length" class="text-muted">None. Import an XDF to add one.</div>
+                            <div class="label mb-1">Where the maps came from</div>
+                            <div v-for="(n, src) in sourceCounts" :key="src" class="flex justify-between border-b border-line/60 py-0.5"><span class="text-muted">{{ sourceLabel[src] ?? src }}</span><span class="font-mono">{{ n }}</span></div>
                         </div>
-                        <button class="btn w-full justify-center" @click="reanalyze">Re-run detection</button>
-                        <label class="block">Notes<textarea v-model="notes" rows="4" class="input mt-1 w-full" @change="saveNotes" /></label>
+                        <div>
+                            <div class="label mb-1">Definitions for this software</div>
+                            <div v-for="d in ed.file.definitions" :key="d.id" class="flex justify-between gap-2"><span class="truncate">{{ d.name }}</span><span class="font-mono text-muted">{{ d.map_count }}</span></div>
+                            <div v-if="!ed.file.definitions?.length" class="text-muted">None. File → Import XDF adds one.</div>
+                        </div>
+                        <label class="block"><span class="label">Notes</span><textarea v-model="notes" rows="4" class="input mt-0.5 w-full" placeholder="Car, customer, what was changed…" @change="saveNotes" /></label>
                     </div>
 
                     <!-- checksum -->
-                    <div v-else-if="side === 'Checksum'" class="space-y-3 text-xs">
-                        <div class="flex items-center justify-between">
-                            <span class="font-semibold">{{ checksum?.module || 'No checksum module' }}</span>
+                    <div v-else-if="side === 'Checksum'" class="space-y-3 text-[12px]">
+                        <div class="flex items-start justify-between gap-2">
+                            <span class="font-medium">{{ checksum?.module || 'No checksum module for this ECU' }}</span>
                             <ChecksumBadge :ok="checksum?.ok ?? null" />
                         </div>
                         <p class="text-[11px] text-muted">
-                            Status of the <b>{{ ed.dirty ? 'modified' : 'original' }}</b> buffer.
-                            <span v-if="checksum?.canFix">Correction available when saving.</span>
-                            <span v-else-if="checksum?.module">Detection only. Correct with your flashing tool.</span>
+                            Showing the {{ ed.dirty ? 'edited' : 'original' }} data.
+                            <span v-if="checksum?.canFix">Corrected automatically when you save.</span>
+                            <span v-else-if="checksum?.module">Check only: correct it in your flashing tool.</span>
                         </p>
-                        <div v-if="checksum?.error" class="text-bad">{{ checksum.error }}</div>
-                        <table class="w-full font-mono text-[10px]">
-                            <tr v-for="(b, i) in checksum?.blocks ?? []" :key="i" class="border-b border-line/50">
-                                <td class="py-1 pr-1"><span :class="b.ok ? 'text-ok' : 'text-bad'">●</span></td>
-                                <td class="py-1 font-sans text-[11px]">{{ b.name }}<div class="text-muted">{{ hex(b.start) }}–{{ hex(b.end) }}</div></td>
-                                <td class="py-1 text-right" :title="`stored ${b.stored} / calc ${b.calculated}`">{{ b.ok ? b.stored : b.stored + '≠' + b.calculated }}</td>
+                        <p v-if="checksum?.error" class="note border-bad text-bad">{{ checksum.error }}</p>
+                        <table class="w-full text-[11px]">
+                            <tr v-for="(b, i) in checksum?.blocks ?? []" :key="i" class="border-b border-line/60 align-top">
+                                <td class="py-1 pr-1.5"><Icon :name="b.ok ? 'check' : 'alert'" :size="12" :class="b.ok ? 'mt-0.5 text-ok' : 'mt-0.5 text-bad'" /></td>
+                                <td class="py-1">{{ b.name }}<div class="font-mono text-[10px] text-muted">{{ hex(b.start) }}–{{ hex(b.end) }}</div></td>
+                                <td class="py-1 pl-1 text-right font-mono text-[10px]" :class="b.ok ? 'text-muted' : 'text-bad'" :title="`stored ${b.stored} / calculated ${b.calculated}`">{{ b.ok ? b.stored : `${b.stored}≠${b.calculated}` }}</td>
                             </tr>
                         </table>
                     </div>
 
                     <!-- versions -->
-                    <div v-else-if="side === 'Versions'" class="space-y-2 text-xs">
-                        <div v-for="v in ed.file.versions" :key="v.id" class="rounded border border-line p-2">
-                            <div class="flex items-center justify-between">
-                                <span class="font-semibold">{{ v.label }}</span>
+                    <div v-else-if="side === 'Versions'" class="text-[12px]">
+                        <div v-for="v in ed.file.versions" :key="v.id" class="border-b border-line py-2 first:pt-0">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="truncate font-medium">{{ v.label }}</span>
                                 <ChecksumBadge :ok="v.checksums?.ok ?? null" />
                             </div>
-                            <div class="text-[11px] text-muted">{{ new Date(v.created_at).toLocaleString() }} · {{ v.checksum_fixed ? 'checksum corrected' : 'no checksum correction' }}</div>
-                            <div v-if="v.changed_maps?.length" class="mt-1 text-[11px] text-muted">{{ v.changed_maps.join(', ') }}</div>
-                            <div class="mt-2 flex gap-1">
-                                <a class="btn btn-sm" :href="`/api/files/${ed.file.id}/versions/${v.id}/download`">Download</a>
-                                <button class="btn btn-sm" @click="openVersion(v)">Load into editor</button>
+                            <div class="text-[11px] text-muted">{{ new Date(v.created_at).toLocaleString() }}<template v-if="!v.checksum_fixed"> · checksums untouched</template></div>
+                            <div v-if="v.changed_maps?.length" class="mt-0.5 truncate text-[11px] text-muted" :title="v.changed_maps.join('\n')">{{ v.changed_maps.join(', ') }}</div>
+                            <div class="mt-1.5 flex gap-1">
+                                <a class="btn btn-sm" :href="`/api/files/${ed.file.id}/versions/${v.id}/download`"><Icon name="download" :size="12" />Download</a>
+                                <button class="btn btn-sm" title="Load this version into the editor" @click="openVersion(v)">Load</button>
                                 <button class="btn btn-sm" title="Diff and review against the original" @click="reviewVersion(v)">Review</button>
-                                <button class="btn btn-sm ml-auto" @click="removeVersion(v)">Delete</button>
+                                <button class="btn btn-quiet btn-sm btn-icon btn-danger ml-auto" :aria-label="`Delete version ${v.label}`" @click="removeVersion(v)"><Icon name="trash" :size="12" /></button>
                             </div>
                         </div>
-                        <div v-if="!ed.file.versions?.length" class="text-muted">No saved versions yet.</div>
+                        <div v-if="!ed.file.versions?.length" class="text-muted">No saved versions. Save… stores one and downloads it.</div>
                     </div>
 
                     <!-- definition -->
                     <div v-else-if="side === 'Definition'">
                         <MapProperties v-if="map" :map="map" />
-                        <hr class="my-4 border-line">
-                        <div class="text-xs font-semibold">Add map manually</div>
-                        <div class="mt-2 flex gap-1">
-                            <input v-model="newAddr" class="input w-24 font-mono" placeholder="hex addr">
-                            <input v-model.number="newRows" type="number" min="1" class="input w-14" title="rows">
-                            <input v-model.number="newCols" type="number" min="1" class="input w-14" title="cols">
-                            <button class="btn" @click="addMap">Add</button>
+                        <div class="label mt-5 mb-1 border-t border-line pt-3">Add a map by hand</div>
+                        <div class="flex gap-1">
+                            <input v-model="newAddr" class="input w-24 font-mono" placeholder="address" aria-label="Hex address">
+                            <input v-model.number="newRows" type="number" min="1" class="input w-14" aria-label="Rows" title="Rows">
+                            <input v-model.number="newCols" type="number" min="1" class="input w-14" aria-label="Columns" title="Columns">
+                            <button class="btn" @click="addMap"><Icon name="plus" :size="12" />Add</button>
                         </div>
                     </div>
                 </div>
             </aside>
         </div>
 
+        <!-- status bar -->
+        <footer class="flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-line bg-panel px-3 font-mono text-[11px] whitespace-nowrap text-muted">
+            <span>{{ ident.variant || ed.file.family || 'unknown ECU' }}<template v-if="ident.hw"> · HW {{ ident.hw }}</template><template v-if="ident.sw"> · SW {{ ident.sw }}</template></span>
+            <span :class="checksum?.ok === false ? 'text-bad' : checksum?.ok ? 'text-ok' : ''">
+                checksum
+                <template v-if="checksum?.ok === true">ok</template>
+                <template v-else-if="checksum?.ok === false">bad{{ checksum.canFix ? ' (fixed on save)' : '' }}</template>
+                <template v-else>n/a</template>
+            </span>
+            <span v-if="ed.changedMapIds.size" class="text-mod">{{ ed.changedMapIds.size }} map{{ ed.changedMapIds.size === 1 ? '' : 's' }} edited · {{ diffBytes }} B</span>
+            <span v-else>no edits</span>
+            <span v-if="ed.reference" class="text-ref">vs {{ ed.refLabel }}</span>
+            <span class="ml-auto">{{ ed.maps.length }} maps · {{ (ed.file.size / 1024).toFixed(0) }} KB · {{ ident.endian === 'be' ? 'big' : 'little' }}-endian</span>
+        </footer>
+
         <!-- save dialog -->
-        <div v-if="saveDialog" class="fixed inset-0 z-40 grid place-items-center bg-black/60" @click.self="saveDialog = false">
-            <div class="w-[420px] rounded-xl border border-line bg-panel p-5 text-xs">
-                <div class="mb-3 text-sm font-semibold">Save modified file</div>
-                <label class="block">Label<input v-model="saveLabel" class="input mt-1 w-full" placeholder="Stage 1"></label>
-                <label class="mt-3 flex items-center gap-2" :class="checksum?.canFix ? '' : 'opacity-50'">
-                    <input v-model="fixChecksum" type="checkbox" :disabled="!checksum?.canFix">
-                    Correct checksums ({{ checksum?.module || 'not available' }})
-                </label>
-                <p v-if="!checksum?.canFix" class="mt-1 text-[11px] text-muted">No checksum correction for this ECU. The file is saved as-is.</p>
-                <div class="mt-3 rounded border border-line bg-bg p-2 text-[11px] text-muted">
-                    Modified maps: {{ changedNames.join(', ') || 'none' }}
+        <div v-if="saveDialog" class="fixed inset-0 z-40 grid place-items-center bg-black/50" @click.self="saveDialog = false" @keydown.esc="saveDialog = false">
+            <div class="w-[440px] border border-line bg-panel text-[12px] shadow-[var(--bb-shadow)]" role="dialog" aria-modal="true" aria-labelledby="save-title">
+                <div class="flex items-center border-b border-line px-4 py-2.5">
+                    <h2 id="save-title" class="text-[13px] font-semibold">Save edited read</h2>
+                    <button class="btn btn-quiet btn-icon ml-auto" aria-label="Close" @click="saveDialog = false"><Icon name="close" /></button>
                 </div>
-                <div class="mt-4 flex justify-end gap-2">
+                <div class="space-y-3 px-4 py-3">
+                    <label class="block"><span class="label">Version name</span><input v-model="saveLabel" class="input mt-0.5 w-full" placeholder="Stage 1, pops off, …" autofocus></label>
+                    <label class="flex cursor-pointer items-center gap-2" :class="checksum?.canFix ? '' : 'cursor-not-allowed opacity-50'">
+                        <input v-model="fixChecksum" type="checkbox" :disabled="!checksum?.canFix" class="accent-[var(--bb-accent-fill)]">
+                        Correct checksums <span class="text-muted">({{ checksum?.module || 'not available' }})</span>
+                    </label>
+                    <p v-if="!checksum?.canFix" class="note">BinBench can't correct checksums for this ECU. The file is saved exactly as edited.</p>
+                    <div>
+                        <div class="label">Edited maps</div>
+                        <p class="mt-0.5 max-h-24 overflow-y-auto text-muted scroll-thin">{{ changedNames.join(', ') || 'none' }}</p>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2 border-t border-line px-4 py-2.5">
                     <button class="btn" @click="saveDialog = false">Cancel</button>
-                    <button class="btn btn-primary" :disabled="saving" @click="saveVersion">{{ saving ? 'Saving…' : 'Save & download' }}</button>
+                    <button class="btn btn-primary" :disabled="saving" @click="saveVersion">{{ saving ? 'Saving…' : 'Save and download' }}</button>
                 </div>
             </div>
         </div>
@@ -195,6 +213,7 @@ import { useEditor } from '../stores/editor';
 import ChecksumBadge from '../components/ChecksumBadge.vue';
 import CompareSelect from '../components/CompareSelect.vue';
 import HexView from '../components/HexView.vue';
+import Icon from '../components/Icon.vue';
 import MapList from '../components/MapList.vue';
 import MapProperties from '../components/MapProperties.vue';
 import MapTable from '../components/MapTable.vue';
@@ -215,6 +234,8 @@ const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
 const side = ref('ECU');
 const saveDialog = ref(false);
+const fileMenu = ref(false);
+const fileMenuEl = ref(null);
 const saveLabel = ref('');
 const fixChecksum = ref(true);
 const saving = ref(false);
@@ -251,7 +272,7 @@ const identRows = computed(() => [
     ['Match score', ident.value.score],
     ['SHA-1', ed.file?.sha1?.slice(0, 16)],
 ].filter((r) => r[1] !== null && r[1] !== undefined && r[1] !== ''));
-const sourceLabel = { pattern: 'Code pattern (exact)', scan: 'Structure scan', xdf: 'XDF definition', user: 'User edited' };
+const sourceLabel = { pattern: 'Found in ECU code', scan: 'Table structure scan', xdf: 'Imported XDF', user: 'Edited by you' };
 const sourceCounts = computed(() => ed.maps.reduce((acc, m) => ({ ...acc, [m.source]: (acc[m.source] ?? 0) + 1 }), {}));
 
 async function load() {
@@ -384,6 +405,9 @@ async function addMap() {
 }
 
 function onKey(e) {
+    if (e.key === 'Escape') {
+        fileMenu.value = false;
+    }
     const ctrl = e.ctrlKey || e.metaKey;
     if (!ctrl || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
     if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
@@ -395,6 +419,10 @@ function onKey(e) {
     }
 }
 
+function closeFileMenu(e) {
+    if (fileMenu.value && !fileMenuEl.value?.contains(e.target)) fileMenu.value = false;
+}
+
 function beforeUnload(e) {
     if (ed.changedMapIds.size) e.preventDefault();
 }
@@ -403,9 +431,11 @@ onMounted(() => {
     load();
     window.addEventListener('keydown', onKey);
     window.addEventListener('beforeunload', beforeUnload);
+    window.addEventListener('mousedown', closeFileMenu);
 });
 onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('beforeunload', beforeUnload);
+    window.removeEventListener('mousedown', closeFileMenu);
 });
 </script>

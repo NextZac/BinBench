@@ -1,31 +1,25 @@
 <template>
     <div class="flex min-h-0 flex-1 flex-col">
         <!-- toolbar -->
-        <div class="flex flex-wrap items-center gap-1.5 border-b border-line bg-panel px-3 py-2">
-            <div class="flex overflow-hidden rounded-md border border-line">
-                <button v-for="m in viewModes" :key="m.id" class="px-2 py-1 text-[11px]"
-                    :class="viewMode === m.id ? 'bg-accent text-black' : 'bg-panel-2 text-muted hover:text-ink'"
-                    :title="m.title" @click="viewMode = m.id">{{ m.label }}</button>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line bg-panel px-3 py-1.5">
+            <div class="seg" role="group" aria-label="Show">
+                <button v-for="m in viewModes" :key="m.id" :aria-pressed="viewMode === m.id" :title="m.title" @click="viewMode = m.id">{{ m.label }}</button>
             </div>
-            <span class="mx-1 h-5 w-px bg-line" />
-            <input v-model="operand" class="input w-20 font-mono" placeholder="value" @keydown.enter.prevent="apply('set')">
-            <button class="btn btn-sm" title="Set selection to value (Enter)" @click="apply('set')">=</button>
-            <button class="btn btn-sm" title="Add value" @click="apply('add')">+</button>
-            <button class="btn btn-sm" title="Subtract value" @click="apply('sub')">−</button>
-            <button class="btn btn-sm" title="Increase by %" @click="apply('pct')">+%</button>
-            <button class="btn btn-sm" title="Decrease by %" @click="apply('-pct')">−%</button>
-            <button class="btn btn-sm" title="Multiply" @click="apply('mul')">×</button>
-            <span class="mx-1 h-5 w-px bg-line" />
-            <button class="btn btn-sm" title="Interpolate between the left and right edge of the selection, spaced by the axis values" @click="interpolate('h')">Interp ↔</button>
-            <button class="btn btn-sm" title="Interpolate between the top and bottom edge of the selection, spaced by the axis values" @click="interpolate('v')">Interp ↕</button>
-            <button class="btn btn-sm" title="Bilinear fill from the selection corners, spaced by the axis values" @click="interpolate('b')">Interp ⊞</button>
-            <button class="btn btn-sm" title="Smooth the selected values (Gaussian, by axis distance). The selection edge stays put. Shift-click: stronger" @click="smooth($event)">Smooth</button>
-            <button class="btn btn-sm" title="Smooth only your changes against the original: keeps the stock shape, evens out steps and feathers the edges. Shift-click: stronger" @click="smoothDelta($event)">Smooth Δ</button>
-            <button class="btn btn-sm" title="Restore selection from original" @click="restoreSelection">Restore</button>
-            <button v-if="ed.reference" class="btn btn-sm" :title="`Copy the selected cells from ${ed.refLabel}`" @click="copyFromReference">Copy from ref</button>
-            <span class="ml-auto text-[11px] text-muted">
-                {{ selCount }} selected<span v-if="selStats"> · min {{ selStats.min }} · max {{ selStats.max }} · avg {{ selStats.avg }}</span>
-            </span>
+            <div class="flex items-center" role="group" aria-label="Change selection by value">
+                <input v-model="operand" class="input w-20 rounded-r-none font-mono" placeholder="value" aria-label="Value" @keydown.enter.prevent="apply('set')">
+                <button v-for="op in ops" :key="op.id" class="btn btn-sm -ml-px h-7 rounded-none px-2 font-mono last:rounded-r-[3px]" :title="op.title" @click="apply(op.id)">{{ op.label }}</button>
+            </div>
+            <div class="flex items-center gap-1" role="group" aria-label="Shape selection">
+                <button class="btn btn-sm" title="Interpolate between the left and right edge of the selection, spaced by the axis values" @click="interpolate('h')">Interp. H</button>
+                <button class="btn btn-sm" title="Interpolate between the top and bottom edge of the selection, spaced by the axis values" @click="interpolate('v')">Interp. V</button>
+                <button class="btn btn-sm" title="Bilinear fill from the selection corners, spaced by the axis values" @click="interpolate('b')">Bilinear</button>
+                <button class="btn btn-sm" title="Smooth the selected values (Gaussian, by axis distance). The selection edge stays put. Shift-click: stronger" @click="smooth($event)">Smooth</button>
+                <button class="btn btn-sm" title="Smooth only your changes against the original: keeps the stock shape, evens out steps and feathers the edges. Shift-click: stronger" @click="smoothDelta($event)">Smooth Δ</button>
+            </div>
+            <div class="flex items-center gap-1">
+                <button class="btn btn-quiet btn-sm" title="Put the selected cells back to the original" @click="restoreSelection">Restore</button>
+                <button v-if="ed.reference" class="btn btn-quiet btn-sm text-ref" :title="`Copy the selected cells from ${ed.refLabel}`" @click="copyFromReference">Copy from {{ ed.refLabel }}</button>
+            </div>
         </div>
 
         <!-- grid -->
@@ -33,36 +27,41 @@
             <table class="border-separate border-spacing-0 font-mono text-[11px] select-none">
                 <thead>
                     <tr>
-                        <th class="sticky top-0 left-0 z-20 border-r border-b border-line bg-panel px-2 py-1 text-[10px] font-normal text-muted">
+                        <th class="sticky top-0 left-0 z-20 border-r border-b border-line bg-panel-2 px-2 py-1 text-left text-[10px] leading-tight font-normal text-muted">
                             <div>{{ map.y?.unit || (map.rows > 1 ? 'Y' : '') }}</div>
                             <div>{{ map.x?.unit || 'X' }}</div>
                         </th>
                         <th v-for="(xv, c) in xAxis" :key="c"
-                            class="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel px-2 py-1 text-right font-medium text-sky-300"
+                            class="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel-2 px-2 py-1 text-right font-medium text-ink/80 hover:text-ink"
                             @mousedown="selectCol(c, $event)">{{ fmt(xv, map.x?.decimals ?? 0) }}</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr v-for="(row, r) in grid" :key="r">
-                        <th class="sticky left-0 z-10 cursor-pointer border-r border-line bg-panel px-2 py-0.5 text-right font-medium text-sky-300"
+                        <th class="sticky left-0 z-10 cursor-pointer border-r border-line bg-panel-2 px-2 py-0.5 text-right font-medium text-ink/80 hover:text-ink"
                             @mousedown="selectRow(r, $event)">{{ fmt(yAxis[r], map.y?.decimals ?? 0) }}</th>
                         <td v-for="(v, c) in row" :key="c"
-                            class="relative min-w-[52px] border-r border-b border-black/30 px-1.5 py-0.5 text-right"
-                            :class="[isSelected(r, c) ? 'outline-2 -outline-offset-2 outline-white' : '', changed(r, c) ? 'font-bold' : '']"
+                            class="relative min-w-[52px] border-r border-b border-bg/60 px-1.5 py-0.5 text-right"
+                            :class="[isSelected(r, c) ? 'outline-2 -outline-offset-2 outline-[var(--bb-accent-fill)]' : '', changed(r, c) ? 'font-semibold' : '']"
                             :style="cellStyle(r, c, v)"
                             :title="cellTitle(r, c)"
                             @mousedown.prevent="startSelect(r, c, $event)"
                             @mouseenter="dragSelect(r, c)"
                             @dblclick="beginEdit(r, c)">
                             <input v-if="editing && editing.r === r && editing.c === c" ref="editInput" v-model="editing.value"
-                                class="w-full bg-black/60 text-right text-white outline-none"
+                                class="w-full bg-bg text-right text-ink outline-none"
                                 @keydown.enter.stop.prevent="commitEdit" @keydown.esc.stop="editing = null" @blur="commitEdit">
                             <template v-else>{{ display(r, c, v) }}</template>
-                            <span v-if="changed(r, c)" class="absolute top-0 right-0 h-1.5 w-1.5 bg-accent" />
+                            <span v-if="changed(r, c)" class="absolute top-0 right-0 border-t-[6px] border-l-[6px] border-t-mod border-l-transparent" aria-hidden="true" />
                         </td>
                     </tr>
                 </tbody>
             </table>
+        </div>
+        <div class="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-panel px-3 font-mono text-[11px] text-muted">
+            <span>{{ selCount }} cell{{ selCount === 1 ? '' : 's' }}</span>
+            <template v-if="selStats"><span>min {{ selStats.min }}</span><span>max {{ selStats.max }}</span><span>avg {{ selStats.avg }}</span></template>
+            <span class="ml-auto hidden lg:inline">type to edit · <span class="kbd">+</span>/<span class="kbd">−</span> step · <span class="kbd">Ctrl</span>+<span class="kbd">C</span>/<span class="kbd">V</span></span>
         </div>
     </div>
 </template>
@@ -82,6 +81,14 @@ const viewModes = computed(() => [
     { id: 'diff', label: 'Δ', title: `Difference to ${ed.refLabel}` },
     { id: 'pct', label: 'Δ%', title: `Difference to ${ed.refLabel} in %` },
 ]);
+const ops = [
+    { id: 'set', label: '=', title: 'Set selection to value (Enter)' },
+    { id: 'add', label: '+', title: 'Add value' },
+    { id: 'sub', label: '−', title: 'Subtract value' },
+    { id: 'pct', label: '+%', title: 'Increase by percent' },
+    { id: '-pct', label: '−%', title: 'Decrease by percent' },
+    { id: 'mul', label: '×', title: 'Multiply by value' },
+];
 const viewMode = ref('value');
 // picking a reference to compare with switches straight to the difference view
 watch(() => ed.reference?.key, (key) => {
@@ -159,8 +166,8 @@ function eachSelected(fn) {
 }
 
 function heat(t) {
-    // blue -> cyan -> green -> yellow -> red
-    const stops = [[37, 99, 235], [6, 182, 212], [34, 197, 94], [234, 179, 8], [239, 68, 68]];
+    // the usual tuning-tool ramp: low = blue, high = red, muted so numbers stay readable
+    const stops = [[52, 101, 164], [62, 150, 160], [96, 156, 84], [214, 168, 52], [206, 74, 52]];
     const x = Math.min(0.9999, Math.max(0, t)) * (stops.length - 1);
     const i = Math.floor(x);
     const f = x - i;
@@ -168,17 +175,29 @@ function heat(t) {
     return a.map((v, k) => Math.round(v + (b[k] - v) * f));
 }
 
+// largest difference to the reference, so Δ shading shows how big a change is, not just its sign
+const maxDelta = computed(() => {
+    let m = 0;
+    grid.value.forEach((row, r) => row.forEach((v, c) => {
+        const d = Math.abs(v - refGrid.value[r][c]);
+        if (Number.isFinite(d)) m = Math.max(m, d);
+    }));
+    return m;
+});
+
 function cellStyle(r, c, v) {
     if (viewMode.value === 'diff' || viewMode.value === 'pct') {
         const d = v - refGrid.value[r][c];
-        if (d === 0) return { background: '#1a212b', color: '#6b7787' };
-        return { background: d > 0 ? 'rgba(239,68,68,.55)' : 'rgba(37,99,235,.6)', color: '#fff' };
+        if (d === 0 || !maxDelta.value) return { color: 'var(--bb-muted)' };
+        const strength = 0.2 + 0.5 * Math.min(1, Math.abs(d) / maxDelta.value);
+        const rgb = d > 0 ? '206 74 52' : '52 101 164';
+        return { background: `rgb(${rgb} / ${strength})`, color: 'var(--bb-heat-ink)' };
     }
     const src = viewMode.value === 'orig' ? refGrid.value[r][c] : v;
     const { min, max } = range.value;
     const t = max > min ? (src - min) / (max - min) : 0.5;
     const [R, G, B] = heat(t);
-    return { background: `rgba(${R},${G},${B},0.42)`, color: '#f1f5f9' };
+    return { background: `rgb(${R} ${G} ${B} / var(--bb-heat-alpha))`, color: 'var(--bb-heat-ink)' };
 }
 
 function display(r, c, v) {

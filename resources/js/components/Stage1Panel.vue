@@ -30,14 +30,14 @@
         <div v-if="error" class="p-6 text-center text-xs text-bad">{{ error }}</div>
         <div v-else-if="result && !result.available" class="space-y-1.5 p-6 text-center text-xs text-muted">
             <div>{{ result.reason }}</div>
-            <div v-for="w in result.warnings" :key="w" class="text-yellow-200">{{ w }}</div>
+            <div v-for="w in result.warnings" :key="w" class="note">{{ w }}</div>
         </div>
         <div v-else-if="!result" class="p-6 text-center text-xs text-muted">Calculating…</div>
 
         <template v-else>
             <!-- proposals -->
             <div class="space-y-1.5 p-3">
-                <div v-for="p in result.proposals" :key="p.mapId" class="flex gap-2 rounded-md border border-line bg-panel-2 p-2 text-xs"
+                <div v-for="p in result.proposals" :key="p.mapId" class="flex gap-2 border-b border-line py-2 text-xs"
                     :class="selected[p.mapId] ? '' : 'opacity-50'">
                     <input v-model="selected[p.mapId]" type="checkbox" class="mt-0.5" :aria-label="`Include ${p.name}`">
                     <div class="min-w-0 flex-1">
@@ -57,8 +57,8 @@
             </div>
 
             <div class="space-y-1.5 px-3">
-                <div v-for="w in result.warnings" :key="w" class="rounded border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">{{ w }}</div>
-                <div v-for="n in result.notes" :key="n" class="text-[11px] text-muted">• {{ n }}</div>
+                <div v-for="w in result.warnings" :key="w" class="note">{{ w }}</div>
+                <div v-for="n in result.notes" :key="n" class="note border-line-strong">{{ n }}</div>
             </div>
 
             <DynoChart v-if="result.dyno?.available" class="mt-2 border-t border-line" :result="result.dyno" modified-label="Stage 1" />
@@ -67,8 +67,8 @@
             <div class="border-t border-line p-3 text-xs">
                 <div class="flex items-center gap-2">
                     <span class="font-semibold">AI review</span>
-                    <span v-if="aiModel" class="chip bg-panel-2 text-muted">{{ aiModel }}</span>
-                    <button class="btn btn-sm ml-auto" :disabled="!result.prompt" title="Copy instructions and a summary of this proposal to paste into Copilot Chat, ChatGPT, DeepSeek or similar" @click="copyPrompt">{{ copied ? 'Copied ✓' : 'Copy prompt' }}</button>
+                    <span v-if="aiModel" class="status text-muted">{{ aiModel }}</span>
+                    <button class="btn btn-sm ml-auto" :disabled="!result.prompt" title="Copy instructions and a summary of this proposal to paste into Copilot Chat, ChatGPT, DeepSeek or similar" @click="copyPrompt">{{ copied ? 'Copied' : 'Copy prompt' }}</button>
                     <button class="btn btn-sm" @click="showPrompt = !showPrompt">{{ showPrompt ? 'Hide prompt' : 'Show prompt' }}</button>
                     <button v-if="result.aiConfigured" class="btn btn-sm" :disabled="explaining" @click="explain">{{ explaining ? 'Asking…' : explanation ? 'Ask again' : 'Explain with AI' }}</button>
                 </div>

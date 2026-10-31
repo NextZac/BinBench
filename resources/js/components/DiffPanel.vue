@@ -9,13 +9,13 @@
                 <label class="flex items-center gap-2">Compare
                     <CompareSelect v-model="target" include-current />
                 </label>
-                <button class="btn btn-sm" title="Swap the two sides" @click="swap">⇄</button>
+                <button class="btn btn-quiet btn-icon" aria-label="Swap the two sides" title="Swap the two sides" @click="swap"><Icon name="swap" /></button>
                 <label class="flex items-center gap-2">against
                     <CompareSelect v-model="base" include-current />
                 </label>
             </div>
         </div>
-        <div v-if="result?.swMismatch" class="mx-3 mt-3 rounded-md border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">
+        <div v-if="result?.swMismatch" class="note mx-3 mt-3">
             {{ result.target.label }} (SW {{ result.target.sw }}) and {{ result.base.label }} (SW {{ result.base.sw }}) have different software.
             Map definitions come from this file, so changes may land in the wrong maps.
         </div>
@@ -28,7 +28,7 @@
         <template v-else>
             <!-- verdict -->
             <div class="flex flex-wrap items-center gap-3 px-3 pt-3 text-xs">
-                <span class="rounded-md px-2.5 py-1 text-sm font-semibold" :class="verdict.class">{{ verdict.label }}</span>
+                <span class="flex items-center gap-1.5 text-[15px] font-semibold" :class="verdict.class"><Icon :name="verdict.icon" :size="15" />{{ verdict.label }}</span>
                 <span class="text-muted">{{ result.changedBytes }} bytes in {{ result.maps.length }} map{{ result.maps.length === 1 ? '' : 's' }}<template v-if="unmappedBytes">, {{ unmappedBytes }} outside known maps</template></span>
                 <span v-if="result.dyno" class="ml-auto font-mono text-[11px]">
                     est. {{ Math.round(result.dyno.stock.power.value) }} → <b>{{ Math.round(result.dyno.modified.power.value) }} PS</b>,
@@ -39,8 +39,8 @@
 
             <!-- findings -->
             <div class="space-y-1.5 p-3">
-                <div v-for="(f, i) in result.review.findings" :key="i" class="flex gap-2 rounded-md border p-2 text-xs" :class="severity[f.severity].box">
-                    <span class="mt-px font-semibold" :class="severity[f.severity].text">{{ severity[f.severity].icon }}</span>
+                <div v-for="(f, i) in result.review.findings" :key="i" class="flex gap-2 border-l-2 py-1 pl-2 text-xs" :class="severity[f.severity].box">
+                    <Icon :name="severity[f.severity].icon" :size="13" class="mt-0.5" :class="severity[f.severity].text" />
                     <div class="min-w-0 flex-1">
                         <div class="font-semibold">{{ f.title }}</div>
                         <div class="text-[11px] text-muted">{{ f.detail }}</div>
@@ -77,9 +77,9 @@
                             <td class="py-1 pr-2 text-right font-mono whitespace-nowrap" :class="m.meanChangePct > 0 ? 'text-ok' : m.meanChangePct < 0 ? 'text-bad' : ''">{{ m.meanChangePct === null ? '—' : (m.meanChangePct > 0 ? '+' : '') + m.meanChangePct + ' %' }}</td>
                             <td class="py-1">
                                 <span class="flex flex-wrap justify-end gap-1">
-                                    <span v-if="m.clamped" class="chip bg-bad/15 text-bad">limit</span>
-                                    <span v-if="m.spike" class="chip bg-warn/15 text-warn">spike</span>
-                                    <span v-if="m.axisChanged" class="chip bg-warn/15 text-warn">axis</span>
+                                    <span v-if="m.clamped" class="status text-bad" title="Values hit the storage limit">limit</span>
+                                    <span v-if="m.spike" class="status text-warn" title="A cell jumps away from its neighbours">spike</span>
+                                    <span v-if="m.axisChanged" class="status text-warn" title="The axis breakpoints were changed">axis</span>
                                 </span>
                             </td>
                         </tr>
@@ -89,7 +89,7 @@
                 <template v-if="result.unmapped.length">
                     <div class="mt-3 mb-1 text-xs font-semibold">Changes outside known maps</div>
                     <div class="flex flex-wrap gap-1.5 font-mono text-[11px]">
-                        <span v-for="u in result.unmapped" :key="u.start" class="rounded border border-line px-1.5 py-0.5">{{ hex(u.start) }}–{{ hex(u.end - 1) }} · {{ u.length }} B</span>
+                        <span v-for="u in result.unmapped" :key="u.start" class="border-b border-line-strong">{{ hex(u.start) }}–{{ hex(u.end - 1) }} · {{ u.length }} B</span>
                     </div>
                 </template>
             </div>
@@ -104,6 +104,7 @@ import { hex } from '../lib/binary';
 import { useEngineInputs } from '../lib/engine';
 import { useEditor } from '../stores/editor';
 import CompareSelect from './CompareSelect.vue';
+import Icon from './Icon.vue';
 
 // versionId: compare this saved version (instead of the current edits) against the original.
 const props = defineProps({ versionId: { type: Number, default: null } });
@@ -118,14 +119,14 @@ let timer = null;
 let requestId = 0;
 
 const verdicts = {
-    risky: { label: 'Risky', class: 'bg-bad/20 text-bad' },
-    check: { label: 'Needs a look', class: 'bg-warn/20 text-warn' },
-    clean: { label: 'Looks clean', class: 'bg-ok/20 text-ok' },
+    risky: { label: 'Risky', class: 'text-bad', icon: 'alert' },
+    check: { label: 'Needs a look', class: 'text-warn', icon: 'alert' },
+    clean: { label: 'Looks clean', class: 'text-ok', icon: 'check' },
 };
 const severity = {
-    danger: { icon: '✕', text: 'text-bad', box: 'border-bad/40 bg-bad/10' },
-    warning: { icon: '!', text: 'text-warn', box: 'border-warn/30 bg-warn/10' },
-    info: { icon: 'i', text: 'text-muted', box: 'border-line bg-panel-2' },
+    danger: { icon: 'alert', text: 'text-bad', box: 'border-bad' },
+    warning: { icon: 'alert', text: 'text-warn', box: 'border-warn' },
+    info: { icon: 'info', text: 'text-muted', box: 'border-line-strong' },
 };
 
 const verdict = computed(() => verdicts[result.value?.review.verdict] ?? verdicts.clean);

@@ -1,13 +1,13 @@
 <template>
     <div>
         <!-- peaks -->
-        <div class="grid grid-cols-2 gap-2 px-3 pt-3 text-xs sm:grid-cols-4">
-            <div v-for="card in cards" :key="card.label" class="rounded-md border border-line bg-panel-2 px-3 py-2">
-                <div class="text-[11px] text-muted">{{ card.label }}</div>
-                <div class="font-mono text-base font-semibold">{{ card.value }}</div>
-                <div class="text-[11px]" :class="card.deltaClass">{{ card.detail }}</div>
+        <dl class="flex flex-wrap divide-x divide-line border-b border-line">
+            <div v-for="card in cards" :key="card.label" class="min-w-36 px-4 py-2">
+                <dt class="label">{{ card.label }}</dt>
+                <dd class="font-mono text-[18px] leading-tight font-medium">{{ card.value }}</dd>
+                <dd class="font-mono text-[11px]" :class="card.deltaClass">{{ card.detail }}</dd>
             </div>
-        </div>
+        </dl>
 
         <div ref="el" class="h-[360px]" />
 
@@ -32,6 +32,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Plotly from 'plotly.js-dist-min';
+import { chartTheme, theme } from '../lib/theme';
 
 // result: a dyno estimate from the API (stock curve, optional modified curve).
 const props = defineProps({
@@ -42,15 +43,12 @@ const el = ref(null);
 let resizeObs = null;
 
 const limiterColors = {
-    "Driver's wish": '#64748b',
-    'Torque limiter': '#06b6d4',
-    'Smoke limiter': '#a855f7',
-    'Max load (LDRXN)': '#eab308',
-    'Torque request (KFMIRL)': '#22c55e',
+    "Driver's wish": '#7d8590',
+    'Torque limiter': '#3e96a0',
+    'Smoke limiter': '#8a6fb0',
+    'Max load (LDRXN)': '#d6a834',
+    'Torque request (KFMIRL)': '#609c54',
 };
-const powerColor = '#f97316';
-const torqueColor = '#06b6d4';
-const axisStyle = { gridcolor: '#2a3442', zerolinecolor: '#2a3442', color: '#8b98a8' };
 
 const shown = computed(() => props.result.modified ?? props.result.stock);
 const limiterNames = computed(() => [...new Set(shown.value.limiter)]);
@@ -86,11 +84,15 @@ const cards = computed(() => {
 });
 
 function limiterColor(name) {
-    return limiterColors[name] ?? '#8b98a8';
+    return limiterColors[name] ?? '#7d8590';
 }
 
 function render() {
     if (!el.value) return;
+    const t = chartTheme();
+    const powerColor = t.accent;
+    const torqueColor = t.ref;
+    const axisStyle = t.axis;
     const { stock, modified } = props.result;
     const label = props.modifiedLabel.toLowerCase();
     const line = (curve, key, name, color, dashed, yaxis) => ({
@@ -108,8 +110,8 @@ function render() {
     Plotly.react(el.value, traces, {
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        font: { color: '#e6edf3', size: 11 },
-        hoverlabel: { bgcolor: '#1c2430', bordercolor: '#2a3442', font: { color: '#e6edf3', size: 11 } },
+        font: t.font,
+        hoverlabel: t.hoverlabel,
         margin: { l: 55, r: 60, t: 50, b: 50 },
         hovermode: 'x unified',
         legend: { orientation: 'h', x: 0, y: 1, yanchor: 'bottom' },
@@ -119,7 +121,7 @@ function render() {
     }, { displaylogo: false, responsive: true });
 }
 
-watch(() => props.result, render);
+watch(() => [props.result, theme.value], render);
 onMounted(() => {
     render();
     resizeObs = new ResizeObserver(() => el.value && Plotly.Plots.resize(el.value));
