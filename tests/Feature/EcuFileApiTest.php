@@ -148,4 +148,44 @@ class EcuFileApiTest extends TestCase
         $this->assertStringContainsString('<title>My boost map</title>', $export->getContent());
         $this->assertStringContainsString('mmedaddress="0x100"', $export->getContent());
     }
+
+    public function test_xdf_import_applies_to_a_read_without_software_number(): void
+    {
+        $unknown = fn (string $name): int => $this->postJson(route('files.store'), [
+            'file' => UploadedFile::fake()->createWithContent($name, str_repeat("\x5A\xA5", 0x8000)),
+        ])->assertCreated()->json('id');
+        $id = $unknown('unknown.bin');
+        $otherId = $unknown('other.bin');
+        $this->assertNull(EcuFile::find($id)->sw);
+
+        $this->postJson(route('files.xdf.import', $id), ['file' => UploadedFile::fake()->createWithContent('t.xdf', $this->xdf('My boost map', '0.5'))])
+            ->assertOk()
+            ->assertJsonPath('imported', 1)
+            ->assertJsonPath('maps.0.name', 'My boost map')
+            ->assertJsonPath('definitions.0.source_filename', 't.xdf');
+
+        // still there after detection runs again, and not leaking to other reads without a SW number
+        $this->postJson(route('files.reanalyze', $id))->assertOk()->assertJsonPath('maps.0.name', 'My boost map');
+        $this->assertNotContains('My boost map', array_column($this->postJson(route('files.reanalyze', $otherId))->json('maps'), 'name'));
+    }
+
+    public function test_newer_xdf_import_wins_at_the_same_address(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+
+        $this->postJson(route('files.xdf.import', $id), ['file' => UploadedFile::fake()->createWithContent('old.xdf', $this->xdf('Old name', '0.5'))])->assertOk();
+        $this->travel(1)->minutes();
+        $this->postJson(route('files.xdf.import', $id), ['file' => UploadedFile::fake()->createWithContent('new.xdf', $this->xdf('New name', '0.25'))])
+            ->assertOk()
+            ->assertJsonPath('maps.0.name', 'New name')
+            ->assertJsonPath('maps.0.factor', 0.25);
+    }
+
+    private function xdf(string $title, string $factor): string
+    {
+        return '<?xml version="1.0"?><XDFFORMAT version="1.60"><XDFHEADER><deftitle>Test</deftitle><BASEOFFSET offset="0" subtract="0" /></XDFHEADER>'
+            .'<XDFTABLE uniqueid="0x1"><title>'.$title.'</title>'
+            .'<XDFAXIS id="z"><EMBEDDEDDATA mmedtypeflags="0x02" mmedaddress="0x100" mmedelementsizebits="16" mmedrowcount="2" mmedcolcount="4" /><MATH equation="X*'.$factor.'"><VAR id="X" /></MATH></XDFAXIS>'
+            .'</XDFTABLE></XDFFORMAT>';
+    }
 }

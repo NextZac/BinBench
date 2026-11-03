@@ -65,9 +65,9 @@ class Analyzer
 
     /**
      * Full analysis. $knownMaps (e.g. from an imported XDF for the same software) take precedence
-     * over auto-detected maps at the same address.
+     * over auto-detected maps at the same address; among them the first one listed wins.
      *
-     * @param  MapDef[]  $knownMaps
+     * @param  MapDef[]  $knownMaps  highest priority first
      * @return array{ident: array<string, mixed>, familyId: string, maps: MapDef[], checksums: array<string, mixed>}
      */
     public function analyze(Bin $bin, array $knownMaps = []): array
@@ -77,7 +77,7 @@ class Analyzer
         $found = $family->findMaps($bin, $ident);
         $byAddress = [];
         foreach ($knownMaps as $map) {
-            $byAddress[$map->address] = $map;
+            $byAddress[$map->address] ??= $map;
         }
         foreach ($found as $map) {
             $byAddress[$map->address] ??= $map;

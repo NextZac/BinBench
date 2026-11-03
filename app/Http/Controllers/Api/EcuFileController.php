@@ -210,6 +210,7 @@ class EcuFileController extends Controller
         $file->user->mapDefinitions()->create([
             'name' => $result['title'] ?: $request->file('file')->getClientOriginalName(),
             'sw' => $file->sw,
+            'ecu_file_id' => $file->id,
             'family_id' => $file->family_id,
             'source_filename' => $request->file('file')->getClientOriginalName(),
             'map_count' => count($maps),
@@ -243,7 +244,7 @@ class EcuFileController extends Controller
         return [
             ...$file->only(['id', 'name', 'original_filename', 'size', 'sha1', 'family', 'family_id', 'sw', 'ident', 'maps', 'checksums', 'notes', 'created_at']),
             'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'checksums', 'changed_maps', 'created_at']),
-            'definitions' => $file->sw ? MapDefinition::where('sw', $file->sw)->where('user_id', $file->user_id)->get(['id', 'name', 'source_filename', 'map_count', 'created_at']) : [],
+            'definitions' => $file->definitions()->map(fn (MapDefinition $d): array => $d->only(['id', 'name', 'source_filename', 'map_count', 'created_at']))->values(),
         ];
     }
 }

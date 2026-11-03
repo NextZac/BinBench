@@ -77,7 +77,7 @@
                 <tbody>
                     <tr v-for="d in definitions" :key="d.id" class="group border-b border-line/70 hover:bg-panel">
                         <td class="py-1.5 pr-3">{{ d.name }}</td>
-                        <td class="py-1.5 pr-3 font-mono">{{ d.sw || 'any' }}</td>
+                        <td class="py-1.5 pr-3 font-mono" :class="d.sw ? '' : 'text-muted'">{{ d.sw || 'its own file only' }}</td>
                         <td class="py-1.5 pr-3 font-mono text-muted">{{ d.source_filename }}</td>
                         <td class="py-1.5 pr-3 text-right font-mono">{{ d.map_count }}</td>
                         <td class="py-1 text-right">

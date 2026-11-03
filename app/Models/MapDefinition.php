@@ -7,11 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * A reusable set of map definitions (e.g. an imported XDF), matched to files by software number.
+ * A reusable set of map definitions (e.g. an imported XDF): applies to the file it was imported for
+ * and to every other file of the same user with the same software number.
  */
 class MapDefinition extends Model
 {
-    protected $fillable = ['name', 'sw', 'family_id', 'source_filename', 'map_count', 'maps'];
+    protected $fillable = ['name', 'sw', 'ecu_file_id', 'family_id', 'source_filename', 'map_count', 'maps'];
 
     protected function casts(): array
     {
@@ -24,6 +25,14 @@ class MapDefinition extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /**
+     * @return BelongsTo<EcuFile, $this>
+     */
+    public function ecuFile(): BelongsTo
+    {
+        return $this->belongsTo(EcuFile::class);
     }
 
     /**
