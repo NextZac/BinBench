@@ -35,7 +35,7 @@
                         </th>
                         <th v-for="(xv, c) in xAxis" :key="c"
                             class="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel-2 px-2 py-1 text-right font-medium hover:text-ink"
-                            :class="axisChanged('x', c) ? 'text-mod' : 'text-ink/80'" :title="axisTitle('x', c)"
+                            :class="[axisChanged('x', c) ? 'text-mod' : 'text-ink/80', isAxisFocus('x', c) ? 'outline-2 -outline-offset-2 outline-[var(--bb-accent-fill)]' : '']" :title="axisTitle('x', c)"
                             @mousedown="selectCol(c, $event)" @dblclick="beginAxisEdit('x', c)">
                             <input v-if="axisEdit?.which === 'x' && axisEdit.i === c" ref="axisInput" v-model="axisEdit.value"
                                 class="w-14 bg-bg text-right text-ink outline-none" @mousedown.stop
@@ -48,7 +48,7 @@
                 <tbody>
                     <tr v-for="(row, r) in grid" :key="r">
                         <th class="sticky left-0 z-10 cursor-pointer border-r border-line bg-panel-2 px-2 py-0.5 text-right font-medium hover:text-ink"
-                            :class="axisChanged('y', r) ? 'text-mod' : 'text-ink/80'" :title="axisTitle('y', r)"
+                            :class="[axisChanged('y', r) ? 'text-mod' : 'text-ink/80', isAxisFocus('y', r) ? 'outline-2 -outline-offset-2 outline-[var(--bb-accent-fill)]' : '']" :title="axisTitle('y', r)"
                             @mousedown="selectRow(r, $event)" @dblclick="beginAxisEdit('y', r)">
                             <input v-if="axisEdit?.which === 'y' && axisEdit.i === r" ref="axisInput" v-model="axisEdit.value"
                                 class="w-14 bg-bg text-right text-ink outline-none" @mousedown.stop
@@ -145,6 +145,7 @@ const origAxes = computed(() => ({
 
 // axis breakpoint editing: single values inline, the whole axis in AxisEditor
 const axisEdit = ref(null);
+const axisFocus = ref(null);
 const axisInput = ref(null);
 const axisDialog = ref(null);
 
@@ -164,13 +165,14 @@ function axisTitle(which, i) {
     return lines.filter(Boolean).join('\n');
 }
 
-async function beginAxisEdit(which, i) {
+async function beginAxisEdit(which, i, initial = null) {
     if (!axisEditable(props.map[which])) return;
-    axisEdit.value = { which, i, value: fmt(axisValues(which)[i], props.map[which].decimals ?? 2) };
+    axisFocus.value = { which, i };
+    axisEdit.value = { which, i, value: initial ?? fmt(axisValues(which)[i], props.map[which].decimals ?? 2) };
     await nextTick();
     const el = Array.isArray(axisInput.value) ? axisInput.value[0] : axisInput.value;
     el?.focus();
-    el?.select();
+    if (initial === null) el?.select();
 }
 
 function commitAxisEdit() {
@@ -235,6 +237,8 @@ const selStats = computed(() => {
 });
 
 watch(() => props.map.id, () => {
+    axisFocus.value = null;
+    axisEdit.value = null;
     sel.value = { r0: 0, c0: 0, r1: 0, c1: 0 };
     editing.value = null;
 });
@@ -301,6 +305,7 @@ function cellTitle(r, c) {
 
 function startSelect(r, c, e) {
     scroller.value?.focus();
+    axisFocus.value = null;
     if (e.shiftKey) {
         sel.value = { ...sel.value, r1: r, c1: c };
     } else {
@@ -314,9 +319,40 @@ function dragSelect(r, c) {
 const stopDrag = () => (dragging.value = false);
 function selectRow(r, e) {
     sel.value = e.shiftKey ? { ...sel.value, r1: r, c1: props.map.cols - 1 } : { r0: r, c0: 0, r1: r, c1: props.map.cols - 1 };
+    focusAxis('y', r, e);
 }
 function selectCol(c, e) {
     sel.value = e.shiftKey ? { ...sel.value, c1: c, r1: props.map.rows - 1 } : { r0: 0, c0: c, r1: props.map.rows - 1, c1: c };
+    focusAxis('x', c, e);
+}
+
+/** A clicked axis value takes the keyboard: typing edits the breakpoint, not the cells below it. */
+function focusAxis(which, i, e) {
+    e?.preventDefault();
+    scroller.value?.focus();
+    axisFocus.value = !e?.shiftKey && axisEditable(props.map[which]) ? { which, i } : null;
+}
+
+const isAxisFocus = (which, i) => axisFocus.value?.which === which && axisFocus.value.i === i;
+
+/** Arrow keys along the focused axis; returns false when the key leaves the axis. */
+function moveAxisFocus(key) {
+    const { which, i } = axisFocus.value;
+    const count = which === 'x' ? props.map.cols : props.map.rows;
+    const step = { x: { ArrowLeft: -1, ArrowRight: 1 }, y: { ArrowUp: -1, ArrowDown: 1 } }[which][key];
+    if (step === undefined) return false;
+    axisFocus.value = { which, i: Math.min(count - 1, Math.max(0, i + step)) };
+    return true;
+}
+
+/** +/- on a focused axis value: one stored step, as long as the order stays intact. */
+function nudgeAxis(dir) {
+    const { which, i } = axisFocus.value;
+    const axis = props.map[which];
+    const values = axisValues(which);
+    const target = values[i] + dir * Math.abs(axis.factor || 1);
+    axisEdit.value = { which, i, value: String(target) };
+    commitAxisEdit();
 }
 
 /** Write new physical values for the selection; fn(oldValue, r, c) => newValue. */
@@ -423,8 +459,23 @@ async function pasteAtSelection() {
 }
 
 function onKey(e) {
-    if (editing.value) return;
+    if (editing.value || axisEdit.value) return;
     const ctrl = e.ctrlKey || e.metaKey;
+    if (axisFocus.value && !ctrl) {
+        const { which, i } = axisFocus.value;
+        if (e.key === 'Escape') axisFocus.value = null;
+        else if (e.key === 'Enter' || e.key === 'F2') beginAxisEdit(which, i);
+        else if (/^[0-9.,]$/.test(e.key)) beginAxisEdit(which, i, e.key);
+        else if (e.key === '+' || e.key === 'PageUp') nudgeAxis(1);
+        else if (e.key === '-' || e.key === 'PageDown') nudgeAxis(-1);
+        else if (e.key.startsWith('Arrow') && moveAxisFocus(e.key)) { /* moved along the axis */ }
+        else if (e.key.startsWith('Arrow')) {
+            axisFocus.value = null;
+            return onKey(e);
+        } else return;
+        e.preventDefault();
+        return;
+    }
     if (ctrl && e.key.toLowerCase() === 'a') {
         sel.value = { r0: 0, c0: 0, r1: props.map.rows - 1, c1: props.map.cols - 1 };
     } else if (ctrl && e.key.toLowerCase() === 'c') {
