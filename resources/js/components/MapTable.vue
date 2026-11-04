@@ -18,6 +18,8 @@
             </div>
             <div class="flex items-center gap-1">
                 <button class="btn btn-quiet btn-sm" title="Put the selected cells back to the original" @click="restoreSelection">Restore</button>
+                <button v-if="map.cols > 1" class="btn btn-quiet btn-sm" :disabled="!axisEditable(map.x)" :title="axisEditable(map.x) ? 'Edit the X axis breakpoints stored in the file' : 'This axis is not stored in the file'" @click="axisDialog = 'x'">X axis…</button>
+                <button v-if="map.rows > 1" class="btn btn-quiet btn-sm" :disabled="!axisEditable(map.y)" :title="axisEditable(map.y) ? 'Edit the Y axis breakpoints stored in the file' : 'This axis is not stored in the file'" @click="axisDialog = 'y'">Y axis…</button>
                 <button v-if="ed.reference" class="btn btn-quiet btn-sm text-ref" :title="`Copy the selected cells from ${ed.refLabel}`" @click="copyFromReference">Copy from {{ ed.refLabel }}</button>
             </div>
         </div>
@@ -32,14 +34,28 @@
                             <div>{{ map.x?.unit || 'X' }}</div>
                         </th>
                         <th v-for="(xv, c) in xAxis" :key="c"
-                            class="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel-2 px-2 py-1 text-right font-medium text-ink/80 hover:text-ink"
-                            @mousedown="selectCol(c, $event)">{{ fmt(xv, map.x?.decimals ?? 0) }}</th>
+                            class="sticky top-0 z-10 cursor-pointer border-b border-line bg-panel-2 px-2 py-1 text-right font-medium hover:text-ink"
+                            :class="axisChanged('x', c) ? 'text-mod' : 'text-ink/80'" :title="axisTitle('x', c)"
+                            @mousedown="selectCol(c, $event)" @dblclick="beginAxisEdit('x', c)">
+                            <input v-if="axisEdit?.which === 'x' && axisEdit.i === c" ref="axisInput" v-model="axisEdit.value"
+                                class="w-14 bg-bg text-right text-ink outline-none" @mousedown.stop
+                                @keydown.enter.stop.prevent="commitAxisEdit" @keydown.esc.stop="axisEdit = null" @blur="commitAxisEdit">
+                            <template v-else>{{ fmt(xv, map.x?.decimals ?? 0) }}</template>
+                            <span v-if="axisChanged('x', c)" class="absolute top-0 right-0 border-t-[5px] border-l-[5px] border-t-mod border-l-transparent" aria-hidden="true" />
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr v-for="(row, r) in grid" :key="r">
-                        <th class="sticky left-0 z-10 cursor-pointer border-r border-line bg-panel-2 px-2 py-0.5 text-right font-medium text-ink/80 hover:text-ink"
-                            @mousedown="selectRow(r, $event)">{{ fmt(yAxis[r], map.y?.decimals ?? 0) }}</th>
+                        <th class="sticky left-0 z-10 cursor-pointer border-r border-line bg-panel-2 px-2 py-0.5 text-right font-medium hover:text-ink"
+                            :class="axisChanged('y', r) ? 'text-mod' : 'text-ink/80'" :title="axisTitle('y', r)"
+                            @mousedown="selectRow(r, $event)" @dblclick="beginAxisEdit('y', r)">
+                            <input v-if="axisEdit?.which === 'y' && axisEdit.i === r" ref="axisInput" v-model="axisEdit.value"
+                                class="w-14 bg-bg text-right text-ink outline-none" @mousedown.stop
+                                @keydown.enter.stop.prevent="commitAxisEdit" @keydown.esc.stop="axisEdit = null" @blur="commitAxisEdit">
+                            <template v-else>{{ fmt(yAxis[r], map.y?.decimals ?? 0) }}</template>
+                            <span v-if="axisChanged('y', r)" class="absolute top-0 right-0 border-t-[5px] border-l-[5px] border-t-mod border-l-transparent" aria-hidden="true" />
+                        </th>
                         <td v-for="(v, c) in row" :key="c"
                             class="relative min-w-[52px] border-r border-b border-bg/60 px-1.5 py-0.5 text-right"
                             :class="[isSelected(r, c) ? 'outline-2 -outline-offset-2 outline-[var(--bb-accent-fill)]' : '', changed(r, c) ? 'font-semibold' : '']"
@@ -61,16 +77,19 @@
         <div class="flex h-6 shrink-0 items-center gap-3 border-t border-line bg-panel px-3 font-mono text-[11px] text-muted">
             <span>{{ selCount }} cell{{ selCount === 1 ? '' : 's' }}</span>
             <template v-if="selStats"><span>min {{ selStats.min }}</span><span>max {{ selStats.max }}</span><span>avg {{ selStats.avg }}</span></template>
-            <span class="ml-auto hidden lg:inline">type to edit · <span class="kbd">+</span>/<span class="kbd">−</span> step · <span class="kbd">Ctrl</span>+<span class="kbd">C</span>/<span class="kbd">V</span></span>
+            <span class="ml-auto hidden lg:inline">double-click an axis value to change it · type to edit · <span class="kbd">+</span>/<span class="kbd">−</span> step · <span class="kbd">Ctrl</span>+<span class="kbd">C</span>/<span class="kbd">V</span></span>
         </div>
+        <AxisEditor v-if="axisDialog" :map="map" :which="axisDialog" @close="axisDialog = null" />
     </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { fmt, readAxis, readCell, readGrid, writeCell } from '../lib/binary';
+import { axisEditable, fmt, hex, readAxis, readCell, readGrid, typeSize, writeAxisValue, writeCell } from '../lib/binary';
 import { interpolateCell, smoothChanges, smoothValues } from '../lib/smoothing';
+import { toast, toastError } from '../lib/toast';
 import { useEditor } from '../stores/editor';
+import AxisEditor from './AxisEditor.vue';
 
 const props = defineProps({ map: { type: Object, required: true } });
 const ed = useEditor();
@@ -119,6 +138,70 @@ const yAxis = computed(() => {
     void ed.revision;
     return readAxis(ed.current, props.map.y, props.map.rows);
 });
+const origAxes = computed(() => ({
+    x: readAxis(ed.original, props.map.x, props.map.cols),
+    y: readAxis(ed.original, props.map.y, props.map.rows),
+}));
+
+// axis breakpoint editing: single values inline, the whole axis in AxisEditor
+const axisEdit = ref(null);
+const axisInput = ref(null);
+const axisDialog = ref(null);
+
+const axisValues = (which) => (which === 'x' ? xAxis.value : yAxis.value);
+const axisChanged = (which, i) => axisEditable(props.map[which]) && axisValues(which)[i] !== origAxes.value[which][i];
+
+function axisTitle(which, i) {
+    const axis = props.map[which];
+    if (!axisEditable(axis)) return axis?.values ? 'Fixed axis from the definition' : 'No stored axis';
+    const users = ed.axisUsers(axis.address, props.map).length;
+    const lines = [
+        `${axis.name || which.toUpperCase() + ' axis'} [${i}] at ${hex(axis.address + i * typeSize(axis.dtype))}`,
+        `Original ${fmt(origAxes.value[which][i], axis.decimals ?? 2)}`,
+        users ? `Shared with ${users} other map(s)` : null,
+        'Double-click to edit',
+    ];
+    return lines.filter(Boolean).join('\n');
+}
+
+async function beginAxisEdit(which, i) {
+    if (!axisEditable(props.map[which])) return;
+    axisEdit.value = { which, i, value: fmt(axisValues(which)[i], props.map[which].decimals ?? 2) };
+    await nextTick();
+    const el = Array.isArray(axisInput.value) ? axisInput.value[0] : axisInput.value;
+    el?.focus();
+    el?.select();
+}
+
+function commitAxisEdit() {
+    if (!axisEdit.value) return;
+    const { which, i, value } = axisEdit.value;
+    axisEdit.value = null;
+    const n = parseFloat(String(value).replace(',', '.'));
+    const values = axisValues(which);
+    if (!Number.isFinite(n) || n === values[i]) return;
+    // breakpoints must stay in their original order, or the ECU's lookup misbehaves
+    const original = origAxes.value[which];
+    const up = original[original.length - 1] >= original[0];
+    const before = values[i - 1];
+    const after = values[i + 1];
+    const outOfOrder = (before !== undefined && (up ? n <= before : n >= before)) || (after !== undefined && (up ? n >= after : n <= after));
+    if (outOfOrder) {
+        toastError(`A breakpoint has to stay between its neighbours (${before === undefined ? '—' : fmt(before, 2)} and ${after === undefined ? '—' : fmt(after, 2)}).`);
+        return;
+    }
+    const axis = props.map[which];
+    const stored = ed.current.slice();
+    const kept = writeAxisValue(stored, axis, i, n);
+    if ((before !== undefined && (up ? kept <= before : kept >= before)) || (after !== undefined && (up ? kept >= after : kept <= after))) {
+        toastError('At the resolution the ECU stores, this value would equal a neighbouring breakpoint.');
+        return;
+    }
+    ed.transact(props.map, (buf) => writeAxisValue(buf, axis, i, n));
+    const users = ed.axisUsers(axis.address, props.map).length;
+    if (users) toast(`This axis is shared with ${users} other map(s): their breakpoint moved too.`);
+    scroller.value?.focus();
+}
 
 const range = computed(() => {
     let min = Infinity;

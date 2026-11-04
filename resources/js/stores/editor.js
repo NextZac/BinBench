@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { api } from '../lib/api';
-import { bytesDiffer, mapRange } from '../lib/binary';
+import { bytesDiffer, mapRanges } from '../lib/binary';
 
 /**
  * Holds the open file: original + working buffer, map definitions, undo history.
@@ -31,19 +31,13 @@ export const useEditor = defineStore('editor', {
         changedMapIds(s) {
             void s.revision;
             if (!s.current) return new Set();
-            return new Set(this.maps.filter((m) => {
-                const [a, b] = mapRange(m);
-                return bytesDiffer(s.original, s.current, a, b);
-            }).map((m) => m.id));
+            return new Set(this.maps.filter((m) => mapRanges(m).some(([a, b]) => bytesDiffer(s.original, s.current, a, b))).map((m) => m.id));
         },
         // maps whose current values differ from the picked reference (empty without one)
         refChangedMapIds(s) {
             void s.revision;
             if (!s.current || !s.reference) return new Set();
-            return new Set(this.maps.filter((m) => {
-                const [a, b] = mapRange(m);
-                return bytesDiffer(s.reference.bytes, s.current, a, b);
-            }).map((m) => m.id));
+            return new Set(this.maps.filter((m) => mapRanges(m).some(([a, b]) => bytesDiffer(s.reference.bytes, s.current, a, b))).map((m) => m.id));
         },
         // P-codes of fault paths whose bytes differ from the original
         changedFaultCodes(s) {
@@ -122,21 +116,31 @@ export const useEditor = defineStore('editor', {
         },
 
         /**
-         * Apply a batch of byte writes as one undo step. `fn(buf)` mutates the buffer.
+         * Apply a batch of byte writes to a map (data and its stored axes) as one undo step.
+         * `fn(buf)` mutates the buffer.
          */
         transact(map, fn) {
-            this.transactRange(...mapRange(map), fn);
+            this.transactRanges(mapRanges(map), fn);
         },
 
         /**
          * Like transact, for any byte range [a, b) (fault paths, raw patches).
          */
         transactRange(a, b, fn) {
-            const before = this.current.slice(a, b);
+            this.transactRanges([[a, b]], fn);
+        },
+
+        /**
+         * One undo step over several byte ranges [[a, b], ...] (a map's data and axes can lie far apart).
+         */
+        transactRanges(ranges, fn) {
+            const segments = ranges.map(([a, b]) => ({ at: a, before: this.current.slice(a, b) }));
             fn(this.current);
-            const after = this.current.slice(a, b);
-            if (before.every((v, i) => v === after[i])) return;
-            this.undoStack.push({ at: a, before, after });
+            const changed = segments
+                .map((seg) => ({ ...seg, after: this.current.slice(seg.at, seg.at + seg.before.length) }))
+                .filter((seg) => seg.before.some((v, i) => v !== seg.after[i]));
+            if (!changed.length) return;
+            this.undoStack.push({ segments: changed });
             if (this.undoStack.length > 200) this.undoStack.shift();
             this.redoStack = [];
             this.revision++;
@@ -145,7 +149,7 @@ export const useEditor = defineStore('editor', {
         undo() {
             const step = this.undoStack.pop();
             if (!step) return;
-            this.current.set(step.before, step.at);
+            step.segments.forEach((seg) => this.current.set(seg.before, seg.at));
             this.redoStack.push(step);
             this.revision++;
         },
@@ -153,16 +157,22 @@ export const useEditor = defineStore('editor', {
         redo() {
             const step = this.redoStack.pop();
             if (!step) return;
-            this.current.set(step.after, step.at);
+            step.segments.forEach((seg) => this.current.set(seg.after, seg.at));
             this.undoStack.push(step);
             this.revision++;
         },
 
+        /** Put a map's data and stored axes back to the original. */
         resetMap(map) {
             this.transact(map, (buf) => {
-                const [a, b] = mapRange(map);
-                buf.set(this.original.slice(a, b), a);
+                for (const [a, b] of mapRanges(map)) buf.set(this.original.slice(a, b), a);
             });
+        },
+
+        /** Maps other than `map` that use the stored axis at `address`. */
+        axisUsers(address, map) {
+            if (address === null || address === undefined) return [];
+            return this.maps.filter((m) => m.id !== map.id && (m.x?.address === address || m.y?.address === address));
         },
 
         async saveMaps(maps) {
