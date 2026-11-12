@@ -74,8 +74,9 @@ class Stage1Planner
         };
         // a map matching two roles is changed once, by the first rule
         $proposals = array_values(array_intersect_key($proposals, array_unique(array_column($proposals, 'mapId'))));
+        $primaries = array_filter(array_map(fn (array $g): ?string => $g[0]->map->id ?? null, $groups));
         foreach ($proposals as $p) {
-            if ($p['changedCells'] === 0) {
+            if ($p['changedCells'] === 0 && in_array($p['mapId'], $primaries, true)) {
                 $this->warnings[] = sprintf('%s was picked as the %s but no cell would change. Check its axes, or pick another map for this role.', $p['name'], self::ROLE_LABELS[$p['role']]);
             }
         }

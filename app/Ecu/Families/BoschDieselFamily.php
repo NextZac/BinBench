@@ -23,7 +23,13 @@ abstract class BoschDieselFamily implements EcuFamily
         [$start, $end] = $this->calibrationRange($bin);
         $candidates = (new AxisScanner($bin, $this->bigEndian(), $start, $end))->scan();
 
-        return (new DieselClassifier)->classify($candidates);
+        return (new DieselClassifier($this->durationSets()))->classify($candidates);
+    }
+
+    /** Whether this family stores its injection duration maps as a back-to-back set (EDC15). */
+    protected function durationSets(): bool
+    {
+        return false;
     }
 
     /**

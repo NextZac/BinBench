@@ -21,6 +21,11 @@ class Edc15Family extends BoschDieselFamily
         return false;
     }
 
+    protected function durationSets(): bool
+    {
+        return true;
+    }
+
     protected function checksumClass(): ?string
     {
         return Edc15Checksum::class;
