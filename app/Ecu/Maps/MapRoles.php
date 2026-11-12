@@ -30,7 +30,7 @@ class MapRoles
      */
     private const SPEC = [
         'wish' => ['name' => "/driver.?s wish|fahrerwunsch|\bmrfa\b/i", 'unit' => 'fuel', 'other' => ['pedal']],
-        'torqueLimit' => ['name' => '/torque limit|drehmomentbegrenz|mengenbegrenz/i', 'unit' => 'fuel', 'other' => ['none', 'pressure']],
+        'torqueLimit' => ['name' => '/torque limit|drehmomentbegrenz|mengenbegrenz/i', 'unit' => 'fuel', 'other' => ['none', 'pressure', 'gear']],
         'fullLoadLimit' => ['name' => '/full.?load (fuel|quantity)|turbo protection|vollastmenge/i', 'unit' => 'fuel', 'other' => ['none', 'pressure']],
         'smoke' => ['name' => '/smoke|rauch/i', 'unit' => 'fuel', 'other' => ['air']],
         'boost' => ['name' => '/boost pressure target|ladedruck.?soll|\bldrsoll/i', 'unit' => 'pressure', 'other' => ['fuel']],
@@ -47,7 +47,7 @@ class MapRoles
         .'\bEGR\b|\bAGR\b|DPF|regenerat|cold start|kaltstart|warm.?up/i';
 
     /** Variants of the main map for some conditions (raised gear group, dynamic): ranked just below it. */
-    private const SECONDARY = '/raised|\bupper\b|\bhigh\b|dynamic|transient/i';
+    private const SECONDARY = '/raised|\bupper\b|\bhigh\b|dynamic|transient|per gear/i';
 
     /** Variants that only apply in some conditions: ranked below the main map. */
     private const VARIANT = '/multi.?map|\(MM\)|\bMM\b|low range|alternativ|reverse|rückwärts|sport|\beco\b|#[2-9]/i';
@@ -65,6 +65,7 @@ class MapRoles
         'air' => '/luft|\bair\b|air mass|luftmasse/i',
         'fuel' => '/mm\^?3|mm³|mg|quantity|menge|\bIQ\b|\bmi\b/i',
         'pressure' => '/hpa|mbar|\bbar\b|kpa|atm|pressure|druck/i',
+        'gear' => '/\bgear\b|\bgang\b/i',
     ];
 
     /** Names of maps that only exist on charged engines. */
@@ -178,7 +179,8 @@ class MapRoles
                 $scored[] = [$map->confidence - $penalty, $map];
             }
         }
-        usort($scored, fn (array $a, array $b): int => [$b[0], $a[1]->address] <=> [$a[0], $b[1]->address]);
+        // equal score: the bigger map is the main one (variants and placeholders are smaller), then address order
+        usort($scored, fn (array $a, array $b): int => [$b[0], $b[1]->rows * $b[1]->cols, $a[1]->address] <=> [$a[0], $a[1]->rows * $a[1]->cols, $b[1]->address]);
 
         return array_column($scored, 1);
     }
@@ -237,7 +239,7 @@ class MapRoles
         if (preg_match(self::AXES['air'], $label)) {
             return in_array('air', $kinds, true);
         }
-        foreach (['pedal', 'pressure', 'fuel'] as $kind) {
+        foreach (['gear', 'pedal', 'pressure', 'fuel'] as $kind) {
             if (preg_match(self::AXES[$kind], $label)) {
                 return in_array($kind, $kinds, true);
             }

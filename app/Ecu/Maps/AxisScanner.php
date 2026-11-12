@@ -9,13 +9,17 @@ use App\Ecu\Bin;
  *
  * Recognised layouts (W = 16-bit word, LE or BE):
  *   A  [id] n  X[n] [id] m  Y[m] Z[n*m]     EDC15 (VAG: no id words, BMW DDE4: RAM-address id before each count)
- *   B  n  m  X[n] Y[m] Z[n*m]               EDC16 / EDC17 / MED17
+ *   B  n  m  X[n] Y[m] Z[n][m]              EDC16 / EDC17 / MED17 (Z runs along the second axis first)
  *   C  [id] n  X[n] Z[n]                    curves
- * An axis is a count followed by strictly increasing values.
+ * An axis is a count followed by strictly increasing values. In layout B one axis may be a plain
+ * index 0..n-1 (e.g. gear 0..7 on EDC16 per-gear limiters) when the other axis is a real one.
  */
 class AxisScanner
 {
-    public const MAX_AXIS = 32;
+    public const MAX_AXIS = 48;
+
+    /** Longest plain index axis (0, 1, 2 ...) accepted next to a real axis: gears, cylinders, modes. */
+    private const MAX_INDEX_AXIS = 10;
 
     /** @var int[] 0-indexed words */
     private array $w;
@@ -39,6 +43,9 @@ class AxisScanner
         while ($i < $this->n - 4) {
             $hit = $this->tryLayoutB($i) ?? $this->tryLayoutA($i) ?? $this->tryCurve($i);
             if ($hit) {
+                $hit = $this->preferLaterB($i, $hit);
+            }
+            if ($hit) {
                 $out[] = $hit;
                 $i = $hit['_endWord'];
 
@@ -48,6 +55,41 @@ class AxisScanner
         }
 
         return $out;
+    }
+
+    /**
+     * A small hit can start inside the header of a real B map (its counts and first axis values
+     * look like a short map). If a clearly larger B map starts within the hit's axes, take it.
+     *
+     * @param  array<string, mixed>  $hit
+     * @return array<string, mixed>
+     */
+    private function preferLaterB(int $i, array $hit): array
+    {
+        $axesEnd = ($hit['address'] - $this->start) / 2;
+        for ($j = $i + 1; $j < $axesEnd; $j++) {
+            $b = $this->tryLayoutB($j);
+            if ($b && $b['rows'] >= 4 && $b['cols'] >= 4 && 2 * $hit['rows'] * $hit['cols'] <= $b['rows'] * $b['cols']) {
+                return $b;
+            }
+        }
+
+        return $hit;
+    }
+
+    /** A plain index 0..n-1 (or 1..n): never a calibration axis on its own. */
+    private function isIndexAxis(int $at, int $count): bool
+    {
+        if ($count < 2 || $count > self::MAX_INDEX_AXIS || $at + $count > $this->n || $this->w[$at] > 1) {
+            return false;
+        }
+        for ($k = 1; $k < $count; $k++) {
+            if ($this->w[$at + $k] !== $this->w[$at] + $k) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private function isAxis(int $at, int $count): bool
@@ -74,7 +116,7 @@ class AxisScanner
         }
         // reject trivial 0,1,2,3... index sequences and tiny counts of tiny numbers (common in code/tables)
         $span = $prev - ($signed ? $w[$at] - 0x10000 : $w[$at]);
-        if ($count >= 3 && $span === $count - 1) {
+        if ($span === $count - 1) {
             return false;
         }
 
@@ -107,11 +149,17 @@ class AxisScanner
         $x = $i + 2;
         $y = $x + $n;
         $z = $y + $m;
-        if (! $this->isAxis($x, $n) || ! $this->isAxis($y, $m) || ! $this->dataOk($z, $n * $m)) {
+        $xOk = $this->isAxis($x, $n);
+        $yOk = $this->isAxis($y, $m);
+        // one index axis is fine when the other is a real axis of some length (per-gear limiters)
+        $xOk = $xOk || ($yOk && $m >= 6 && $this->isIndexAxis($x, $n));
+        $yOk = $yOk || ($xOk && $n >= 6 && $this->isIndexAxis($y, $m));
+        if (! $xOk || ! $yOk || ! $this->dataOk($z, $n * $m)) {
             return null;
         }
 
-        return $this->make('B', $z, $m, $n, $x, $n, $y, $m, $i);
+        // values are stored per point of the first axis, so that axis is the rows (as in layout A)
+        return $this->make('B', $z, $n, $m, $y, $m, $x, $n, $i);
     }
 
     /** A: [id] n X [id] m Y Z */
@@ -147,6 +195,10 @@ class AxisScanner
     {
         $n = $this->w[$i];
         if ($n < 4 || $n > self::MAX_AXIS || ! $this->isAxis($i + 1, $n) || ! $this->dataOk($i + 1 + $n, $n)) {
+            return null;
+        }
+        // the count is repeated just before the real count (padding): the curve starts one word later
+        if ($this->w[$i + 1] === $n && $this->tryCurve($i + 1) !== null) {
             return null;
         }
         // reject if "data" is just the axis continuing (part of a larger monotonic run)

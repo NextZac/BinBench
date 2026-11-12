@@ -35,9 +35,10 @@ class AxisScannerTest extends TestCase
         $synthetic = new SyntheticBin(0x10000);
         $rpm = [800, 1200, 1600, 2000, 2500, 3000, 3500, 4000];
         $iq = [0, 500, 1000, 2000, 3000, 4000, 5000, 6000];
+        // EDC16 stores the values per point of the first axis
         $data = [];
-        foreach ($iq as $i => $_) {
-            foreach ($rpm as $r => $__) {
+        foreach ($rpm as $r => $_) {
+            foreach ($iq as $i => $__) {
                 $data[] = 1000 + $i * 120 + $r * 40;
             }
         }
@@ -47,6 +48,8 @@ class AxisScannerTest extends TestCase
         $this->assertCount(1, $candidates);
         $this->assertSame('B', $candidates[0]['layout']);
         $this->assertSame(0x2000 + 2 * (2 + 16), $candidates[0]['address']);
+        $this->assertSame($rpm, $candidates[0]['yRaw']);
+        $this->assertSame($iq, $candidates[0]['xRaw']);
     }
 
     public function test_ignores_erased_flash_and_random_data(): void
