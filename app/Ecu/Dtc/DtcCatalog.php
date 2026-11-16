@@ -193,6 +193,33 @@ class DtcCatalog
     }
 
     /**
+     * Emissions-monitor families that can be identified from a generic P-code.
+     * These identify fault-table references; they do not prove a monitor is currently enabled.
+     *
+     * @return string[]
+     */
+    public static function monitorSystems(int $code): array
+    {
+        if (self::isUnused($code) || $code >= 0x4000) {
+            return [];
+        }
+
+        if (in_array($code, [0x0136, 0x0137, 0x0138, 0x0139, 0x0140, 0x0141, 0x0156, 0x0157, 0x0158, 0x0159, 0x0160, 0x0161], true)) {
+            return ['rear_o2'];
+        }
+
+        if ($code >= 0x0400 && $code <= 0x0409) {
+            return ['egr'];
+        }
+
+        if (in_array($code, [0x2002, 0x242F, 0x244A, 0x244B, 0x2452, 0x2453, 0x2454, 0x2455, 0x2458, 0x2459, 0x2463], true)) {
+            return ['dpf'];
+        }
+
+        return [];
+    }
+
+    /**
      * Why a code is emissions-related, or null. $vagCodes applies the VAG meaning of P1xxx codes.
      */
     public static function emissionReason(int $code, bool $vagCodes = true): ?string

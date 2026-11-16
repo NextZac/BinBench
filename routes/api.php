@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\DefinitionController;
 use App\Http\Controllers\Api\DiffController;
 use App\Http\Controllers\Api\DtcController;
 use App\Http\Controllers\Api\EcuFileController;
+use App\Http\Controllers\Api\PatchController;
 use App\Http\Controllers\Api\TuningController;
 use Illuminate\Support\Facades\Route;
 
@@ -39,6 +40,12 @@ Route::middleware('auth')->group(function () {
 
         Route::post('files/{file}/diff', DiffController::class)->name('files.diff');
         Route::get('files/{file}/dtcs', DtcController::class)->name('files.dtcs');
+
+        Route::controller(PatchController::class)->prefix('files/{file}/patches')->name('files.patches.')->group(function () {
+            Route::post('/', 'index')->name('index');
+            Route::post('{patch}/install', 'install')->name('install');
+            Route::post('{patch}/uninstall', 'uninstall')->name('uninstall');
+        });
 
         Route::controller(TuningController::class)->prefix('files/{file}/stage1')->name('files.stage1')->group(function () {
             Route::post('/', 'stage1');

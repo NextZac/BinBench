@@ -60,6 +60,9 @@ export const api = {
     dyno: (id, bytes, params = {}) => request('POST', `/files/${id}/dyno?${query(params)}`, bytes ?? undefined),
     diff: (id, bytes, params = {}) => request('POST', `/files/${id}/diff?${query(params)}`, bytes ?? undefined),
     dtcs: (id) => request('GET', `/files/${id}/dtcs`),
+    patches: (id, bytes) => request('POST', `/files/${id}/patches`, bytes),
+    installPatch: (id, patch, bytes) => request('POST', `/files/${id}/patches/${patch}/install`, bytes),
+    uninstallPatch: (id, patch, bytes) => request('POST', `/files/${id}/patches/${patch}/uninstall`, bytes),
     stage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1?${query(params)}`, bytes ?? undefined),
     explainStage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1/explain?${query(params)}`, bytes ?? undefined),
     saveVersion: (id, bytes, { label, fix, changedMaps }) => {
