@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
 use App\Ecu\Maps\MapDef;
+use App\Ecu\Patches\PatchService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -71,18 +72,21 @@ class EcuFile extends Model
     }
 
     /**
-     * Identify the file, find maps (plus the owner's stored definitions for the same software) and check checksums.
+     * Identify the file, find maps (plus the owner's stored definitions for the same software, then the
+     * tables of code patches already in the file) and check checksums.
      */
     public function analyze(): self
     {
         $analyzer = new Analyzer;
         $bin = $this->bin();
-        $sw = $analyzer->identify($bin)['ident']['sw'] ?? null;
+        $identified = $analyzer->identify($bin);
+        $sw = $identified['ident']['sw'] ?? null;
 
         $known = [];
         foreach ($this->definitions($sw) as $definition) {
             array_push($known, ...$definition->mapDefs());
         }
+        array_push($known, ...(new PatchService)->installedMaps($bin, $identified['family']->id()));
 
         $result = $analyzer->analyze($bin, $known);
 

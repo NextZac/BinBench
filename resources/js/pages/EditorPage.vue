@@ -44,6 +44,7 @@
                 <Stage1Panel v-else-if="mainView === 'stage1'" />
                 <DiffPanel v-else-if="mainView === 'diff'" :version-id="diffVersion" />
                 <FaultsPanel v-else-if="mainView === 'faults'" />
+                <PatchesPanel v-else-if="mainView === 'patches'" />
                 <template v-else-if="map">
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5">
                         <div class="min-w-[14rem] flex-1">
@@ -229,13 +230,14 @@ const DynoPanel = defineAsyncComponent(() => import('../components/DynoPanel.vue
 const Stage1Panel = defineAsyncComponent(() => import('../components/Stage1Panel.vue'));
 const DiffPanel = defineAsyncComponent(() => import('../components/DiffPanel.vue'));
 const FaultsPanel = defineAsyncComponent(() => import('../components/FaultsPanel.vue'));
+const PatchesPanel = defineAsyncComponent(() => import('../components/PatchesPanel.vue'));
 
 const props = defineProps({ id: { type: String, required: true } });
 const ed = useEditor();
 const loading = ref(true);
 const views = ['Table', 'Split', '3D', 'Hex'];
 const view = ref('Split');
-const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }, { id: 'diff', label: 'Diff' }, { id: 'faults', label: 'Faults' }];
+const mainViews = [{ id: 'maps', label: 'Maps' }, { id: 'dyno', label: 'Dyno' }, { id: 'stage1', label: 'Stage 1' }, { id: 'diff', label: 'Diff' }, { id: 'faults', label: 'Faults' }, { id: 'patches', label: 'Patches' }];
 const mainView = ref('maps');
 const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
