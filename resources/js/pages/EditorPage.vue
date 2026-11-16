@@ -130,10 +130,15 @@
                         <div v-for="v in ed.file.versions" :key="v.id" class="rounded border border-line p-2">
                             <div class="flex items-center justify-between">
                                 <span class="font-semibold">{{ v.label }}</span>
-                                <ChecksumBadge :ok="v.checksums?.ok ?? null" />
+                                <span v-if="v.export_state === 'verified'" class="chip bg-ok/15 text-ok" title="Every checksum block validated at export">Verified</span>
+                                <span v-else class="chip bg-bad/15 text-bad" :title="v.unverified_reason">Unverified</span>
                             </div>
-                            <div class="text-[11px] text-muted">{{ new Date(v.created_at).toLocaleString() }} · {{ v.checksum_fixed ? 'checksum corrected' : 'no checksum correction' }}</div>
-                            <div v-if="v.changed_maps?.length" class="mt-1 text-[11px] text-muted">{{ v.changed_maps.join(', ') }}</div>
+                            <div class="text-[11px] text-muted">{{ new Date(v.created_at).toLocaleString() }} · {{ v.checksum_fixed ? `checksums corrected (${v.changes?.correction?.bytes ?? '?'} bytes)` : 'checksums not changed' }}</div>
+                            <div v-if="v.export_state !== 'verified' && v.unverified_reason" class="mt-1 text-[11px] text-bad">{{ v.unverified_reason }}</div>
+                            <div v-if="v.changes" class="mt-1 text-[11px] text-muted">
+                                {{ v.changes.changedBytes }} bytes in {{ v.changes.maps.length }} map{{ v.changes.maps.length === 1 ? '' : 's' }}<template v-if="v.changes.unmapped.length">, {{ v.changes.unmapped.length }} range{{ v.changes.unmapped.length === 1 ? '' : 's' }} outside known maps</template>
+                            </div>
+                            <div v-if="v.changed_maps?.length" class="mt-1 text-[11px] text-muted">{{ v.changed_maps.slice(0, 8).join(', ') }}<template v-if="v.changed_maps.length > 8"> +{{ v.changed_maps.length - 8 }} more</template></div>
                             <div class="mt-2 flex gap-1">
                                 <a class="btn btn-sm" :href="`/api/files/${ed.file.id}/versions/${v.id}/download`">Download</a>
                                 <button class="btn btn-sm" @click="openVersion(v)">Load into editor</button>
@@ -161,7 +166,7 @@
         </div>
 
         <!-- save dialog -->
-        <div v-if="saveDialog" class="fixed inset-0 z-40 grid place-items-center bg-black/60" @click.self="saveDialog = false">
+        <div v-if="saveDialog" class="fixed inset-0 z-40 grid place-items-center bg-black/60" @click.self="closeSaveDialog">
             <div class="w-[420px] rounded-xl border border-line bg-panel p-5 text-xs">
                 <div class="mb-3 text-sm font-semibold">Save modified file</div>
                 <label class="block">Label<input v-model="saveLabel" class="input mt-1 w-full" placeholder="Stage 1"></label>
@@ -169,13 +174,29 @@
                     <input v-model="fixChecksum" type="checkbox" :disabled="!checksum?.canFix">
                     Correct checksums ({{ checksum?.module || 'not available' }})
                 </label>
-                <p v-if="!checksum?.canFix" class="mt-1 text-[11px] text-muted">No checksum correction for this ECU. The file is saved as-is.</p>
+                <p class="mt-1 text-[11px] text-muted">A file is only exported as verified when every checksum block validates after correction.</p>
                 <div class="mt-3 rounded border border-line bg-bg p-2 text-[11px] text-muted">
                     Modified maps: {{ changedNames.join(', ') || 'none' }}
                 </div>
+
+                <!-- export gate: shown when the server refused to export an unverified file -->
+                <div v-if="blocked" class="mt-3 rounded border border-bad/40 bg-bad/10 p-2">
+                    <div class="font-semibold text-bad">Checksums not verified</div>
+                    <div class="mt-0.5 text-[11px]">{{ blocked.reason }}</div>
+                    <div v-if="blockedBlocks.length" class="mt-1 font-mono text-[10px] text-muted">
+                        <div v-for="b in blockedBlocks" :key="b.name">✕ {{ b.name }}</div>
+                    </div>
+                    <label class="mt-2 flex items-start gap-2 text-[11px]">
+                        <input v-model="acknowledge" type="checkbox" class="mt-0.5">
+                        <span>I understand that BinBench has not verified this file's checksums. My flash tool must correct them, or the ECU may not start. This is recorded with the version.</span>
+                    </label>
+                </div>
+
                 <div class="mt-4 flex justify-end gap-2">
-                    <button class="btn" @click="saveDialog = false">Cancel</button>
-                    <button class="btn btn-primary" :disabled="saving" @click="saveVersion">{{ saving ? 'Saving…' : 'Save & download' }}</button>
+                    <button class="btn" @click="closeSaveDialog">Cancel</button>
+                    <button class="btn btn-primary" :disabled="saving || (blocked && !acknowledge)" @click="saveVersion">
+                        {{ saving ? 'Saving…' : blocked ? 'Save as unverified' : 'Save & download' }}
+                    </button>
                 </div>
             </div>
         </div>
@@ -212,6 +233,9 @@ const side = ref('ECU');
 const saveDialog = ref(false);
 const saveLabel = ref('');
 const fixChecksum = ref(true);
+const blocked = ref(null); // { reason, checksums } when the export gate refused
+const acknowledge = ref(false);
+const blockedBlocks = computed(() => (blocked.value?.checksums?.blocks ?? []).filter((b) => !b.ok).slice(0, 6));
 const saving = ref(false);
 const notes = ref('');
 const newAddr = ref('');
@@ -280,19 +304,32 @@ async function saveVersion() {
     try {
         const version = await api.saveVersion(ed.file.id, ed.current, {
             label: saveLabel.value,
-            fix: fixChecksum.value && checksum.value?.canFix,
-            changedMaps: changedNames.value,
+            fix: fixChecksum.value,
+            acknowledgeUnverified: blocked.value !== null && acknowledge.value,
         });
-        saveDialog.value = false;
-        toast(`Saved "${version.label}"${version.checksum_fixed ? ' with corrected checksums' : ''}`);
+        closeSaveDialog();
+        toast(version.export_state === 'verified'
+            ? `Saved "${version.label}": checksums verified${version.checksum_fixed ? ' after correction' : ''}`
+            : `Saved "${version.label}" as UNVERIFIED`);
         window.location.href = `/api/files/${ed.file.id}/versions/${version.id}/download`;
         ed.setFile(await api.file(ed.file.id));
         side.value = 'Versions';
     } catch (e) {
-        toastError(e);
+        if (e.data?.needsAcknowledgement) {
+            blocked.value = { reason: e.message, checksums: e.data.checksums };
+            acknowledge.value = false;
+        } else {
+            toastError(e);
+        }
     } finally {
         saving.value = false;
     }
+}
+
+function closeSaveDialog() {
+    saveDialog.value = false;
+    blocked.value = null;
+    acknowledge.value = false;
 }
 
 async function openVersion(v) {

@@ -18,8 +18,16 @@ class Analyzer
     /** @var EcuFamily[] */
     private array $families;
 
-    public function __construct()
+    /**
+     * @param  EcuFamily[]|null  $families  replaces the built-in family list (tests, future registry)
+     */
+    public function __construct(?array $families = null)
     {
+        if ($families !== null) {
+            $this->families = $families;
+
+            return;
+        }
         $classes = [
             'App\\Ecu\\Families\\Me7Family',
             Edc15Family::class,

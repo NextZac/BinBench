@@ -22,13 +22,15 @@ async function request(method, url, body, { raw = false } = {}) {
     }
     if (!res.ok) {
         let message = `${res.status} ${res.statusText}`;
+        let data = null;
         try {
-            const data = await res.json();
+            data = await res.json();
             message = data.message || message;
         } catch {
             // not JSON
         }
-        throw new Error(message);
+        // callers that can act on a refusal (e.g. the export gate) read the details from error.data
+        throw Object.assign(new Error(message), { status: res.status, data });
     }
     if (raw) {
         return new Uint8Array(await res.arrayBuffer());
@@ -61,12 +63,12 @@ export const api = {
     diff: (id, bytes, params = {}) => request('POST', `/files/${id}/diff?${query(params)}`, bytes ?? undefined),
     stage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1?${query(params)}`, bytes ?? undefined),
     explainStage1: (id, bytes, params = {}) => request('POST', `/files/${id}/stage1/explain?${query(params)}`, bytes ?? undefined),
-    saveVersion: (id, bytes, { label, fix, changedMaps }) => {
+    saveVersion: (id, bytes, { label, fix, acknowledgeUnverified }) => {
         const form = new FormData();
         form.append('file', new Blob([bytes]), 'modified.bin');
         form.append('label', label ?? '');
         form.append('fix', fix ? '1' : '0');
-        form.append('changed_maps', JSON.stringify(changedMaps ?? []));
+        form.append('acknowledge_unverified', acknowledgeUnverified ? '1' : '0');
         return request('POST', `/files/${id}/versions`, form);
     },
     removeVersion: (id, versionId) => request('DELETE', `/files/${id}/versions/${versionId}`),

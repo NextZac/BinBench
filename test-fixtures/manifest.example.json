@@ -1,0 +1,44 @@
+{
+    "fixtures": [
+        {
+            "file": "me7/8e0909559h_0003_multimap_chk.bin",
+            "sha1": "608915ae171cc60c1a07c0c5221de9f32c9326a7",
+            "note": "Audi 3.0 V6 ME7.1.1, tuned (launch control, multimap), checksums corrected by another tool",
+            "family": "me7",
+            "sw": "1037363946",
+            "checksum": { "module": "Bosch ME7.x (ME7Sum)", "ok": true, "blocks": 74 },
+            "mutate": "0x15504",
+            "maps": [
+                { "address": "0x15504", "rows": 16, "cols": 16, "name": "KFMIRL" },
+                { "address": "0x12E45", "rows": 16, "cols": 12, "name": "KFZW" },
+                { "address": "0x2851E", "rows": 15, "cols": 6, "name": "LAMFA" }
+            ]
+        },
+        {
+            "file": "edc15/bmw_dde4_m57_1037351632.bin",
+            "sha1": "cbef79609892702800f6bc72e8ef5f3c9b7596b6",
+            "note": "BMW M57 3.0d DDE4 (EDC15C)",
+            "family": "edc15",
+            "sw": "1037351632",
+            "checksum": { "module": "Bosch EDC15C BMW (DDE4)", "ok": true, "blocks": 3 },
+            "mutate": "0x71F0C"
+        },
+        {
+            "file": "edc16/bmw_edc16c35_1037390904_stock.bin",
+            "sha1": "0d0701867c6ca3f1fe9ee0128c383821ce90e963",
+            "note": "BMW EDC16C35 stock, 2 MB. No checksum module yet: must stay unverified until one exists",
+            "family": "edc16",
+            "sw": "1037390904",
+            "checksum": { "module": null, "ok": null },
+            "maps": [
+                { "address": "0xC70FC", "rows": 14, "cols": 8, "name": "Driver's wish" },
+                { "address": "0xD9206", "rows": 1, "cols": 20, "name": "Torque limiter (IQ vs rpm)" },
+                { "address": "0xD85E8", "rows": 21, "cols": 8, "name": "Torque limiter (per gear)" },
+                { "address": "0xDE20E", "rows": 16, "cols": 16, "name": "Boost pressure target" },
+                { "address": "0xF2250", "rows": 13, "cols": 10, "name": "Boost pressure limiter" },
+                { "address": "0xF9CB0", "rows": 16, "cols": 16, "name": "Rail pressure target" },
+                { "address": "0xED196", "rows": 16, "cols": 40, "name": "Injection duration" }
+            ]
+        }
+    ]
+}

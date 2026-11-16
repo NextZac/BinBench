@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
 use App\Ecu\Dyno\DynoEstimator;
+use App\Ecu\Export\ExportBlocked;
+use App\Ecu\Export\ExportGate;
 use App\Ecu\Maps\MapDef;
 use App\Ecu\Xdf\XdfExporter;
 use App\Ecu\Xdf\XdfImporter;
@@ -116,41 +118,50 @@ class EcuFileController extends Controller
     }
 
     /**
-     * Store a modified version, optionally correcting checksums.
+     * Store a modified version. Everything goes through the ExportGate: checksums are corrected
+     * where possible and verified, and a file that cannot be verified needs an acknowledgement.
      */
-    public function saveVersion(Request $request, EcuFile $file): JsonResponse
+    public function saveVersion(Request $request, EcuFile $file, ExportGate $gate): JsonResponse
     {
         $request->validate([
             'file' => ['required', 'file', 'max:8192'],
             'label' => ['nullable', 'string', 'max:200'],
             'fix' => ['nullable', 'boolean'],
-            'changed_maps' => ['nullable', 'string'],
+            'acknowledge_unverified' => ['nullable', 'boolean'],
         ]);
-        $bin = new Bin($request->file('file')->getContent());
-        if ($bin->size !== $file->size) {
+        $original = $file->bin();
+        if (sha1($original->data) !== $file->sha1) {
+            return response()->json(['message' => 'The stored original no longer matches its recorded hash. Nothing was saved; restore the file from a backup.'], 409);
+        }
+        $modified = new Bin($request->file('file')->getContent());
+        if ($modified->size !== $file->size) {
             return response()->json(['message' => 'Modified file size differs from the original.'], 422);
         }
+        $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
 
-        $analyzer = new Analyzer;
-        $fixed = false;
-        if ($request->boolean('fix')) {
-            try {
-                $bin = $analyzer->fixChecksums($bin, $file->family_id);
-                $fixed = true;
-            } catch (\Throwable $e) {
-                return response()->json(['message' => 'Checksum correction failed: '.$e->getMessage()], 422);
-            }
+        try {
+            $export = $gate->prepare($original, $modified, (string) $file->family_id, $maps,
+                $request->boolean('fix', true), $request->boolean('acknowledge_unverified'));
+        } catch (ExportBlocked $e) {
+            return response()->json([
+                'message' => $e->reason,
+                'needsAcknowledgement' => true,
+                'checksums' => $e->checksums,
+            ], 422);
         }
 
         $path = 'bins/'.Str::uuid().'.bin';
-        Storage::disk('local')->put($path, $bin->data);
+        Storage::disk('local')->put($path, $export['bin']->data);
         $version = $file->versions()->create([
             'label' => $request->input('label') ?: 'Version '.($file->versions()->count() + 1),
             'path' => $path,
-            'sha1' => sha1($bin->data),
-            'checksum_fixed' => $fixed,
-            'checksums' => $analyzer->checksumReport($analyzer->family($file->family_id)?->checksum($bin), $bin),
-            'changed_maps' => json_decode($request->input('changed_maps', '[]'), true) ?: [],
+            'sha1' => sha1($export['bin']->data),
+            'checksum_fixed' => $export['corrected'],
+            'export_state' => $export['state'],
+            'unverified_reason' => $export['reason'],
+            'checksums' => $export['checksums'],
+            'changed_maps' => array_column($export['changes']['maps'], 'name'),
+            'changes' => $export['changes'],
         ]);
 
         return response()->json($version, 201);
@@ -159,7 +170,7 @@ class EcuFileController extends Controller
     public function downloadVersion(EcuFile $file, EcuFileVersion $version): Response
     {
         abort_unless($version->ecu_file_id === $file->id, 404);
-        $name = Str::slug($file->name.' '.$version->label, '_').($version->checksum_fixed ? '_CHK' : '_NOCHK').'.bin';
+        $name = Str::slug($file->name.' '.$version->label, '_').($version->export_state === ExportGate::VERIFIED ? '_CHK' : '_UNVERIFIED').'.bin';
 
         return response(Storage::disk('local')->get($version->path), 200, [
             'Content-Type' => 'application/octet-stream',
@@ -232,7 +243,7 @@ class EcuFileController extends Controller
     {
         return [
             ...$file->only(['id', 'name', 'original_filename', 'size', 'sha1', 'family', 'family_id', 'sw', 'ident', 'maps', 'checksums', 'notes', 'created_at']),
-            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'checksums', 'changed_maps', 'created_at']),
+            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'export_state', 'unverified_reason', 'checksums', 'changed_maps', 'changes', 'created_at']),
             'definitions' => $file->sw ? MapDefinition::where('sw', $file->sw)->where('user_id', $file->user_id)->get(['id', 'name', 'source_filename', 'map_count', 'created_at']) : [],
         ];
     }
