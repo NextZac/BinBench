@@ -61,10 +61,17 @@ class PatchController extends Controller
         }
 
         $writes = $required === 'available' ? $patch->install($bin) : $patch->uninstall($bin);
+        // map definitions describe the installed state: read them from the patched buffer on install
+        $installed = $bin;
+        if ($required === 'available') {
+            foreach ($writes as $write) {
+                $installed = $installed->withPatch($write['address'], $write['bytes']);
+            }
+        }
 
         return response()->json([
             'writes' => PatchService::serializeWrites($writes),
-            'maps' => array_map(fn (MapDef $map): array => $map->toArray(), $patch->maps($bin)),
+            'maps' => array_map(fn (MapDef $map): array => $map->toArray(), $patch->maps($installed)),
         ]);
     }
 

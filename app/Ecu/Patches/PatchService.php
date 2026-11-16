@@ -14,6 +14,7 @@ class PatchService
     private const PATCHES = [
         Dde4CruiseSwitchMultimap::class,
         Dde4CruiseButtonsMultimap::class,
+        Dde5CruiseSwitchMultimap::class,
     ];
 
     /**

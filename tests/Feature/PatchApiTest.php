@@ -11,6 +11,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\SyntheticDde4;
+use Tests\Support\SyntheticDde5;
 use Tests\TestCase;
 
 class PatchApiTest extends TestCase
@@ -78,6 +79,21 @@ class PatchApiTest extends TestCase
 
         $removed = $this->postBuffer('files.patches.uninstall', $file, $patched, ['patch' => 'dde4-multimap-3'])->assertOk();
         $this->assertSame($stock, $this->applyWrites($patched, $removed->json('writes')));
+    }
+
+    public function test_install_lists_map_two_tables_read_from_the_installed_copies(): void
+    {
+        $stock = SyntheticDde5::build(multimapSites: true);
+        $file = $this->upload($stock);
+
+        $this->postJson(route('files.patches.index', $file))
+            ->assertJsonPath('patches.0.id', 'dde5-multimap-2')
+            ->assertJsonPath('patches.0.status', 'available');
+        $response = $this->postBuffer('files.patches.install', $file, $stock, ['patch' => 'dde5-multimap-2'])->assertOk();
+
+        $names = array_column($response->json('maps'), 'name');
+        $this->assertCount(24, $names);
+        $this->assertContains('Map 2 · Boost pressure target 1', $names);
     }
 
     public function test_rejects_unknown_patches_and_buffers_of_another_size(): void
