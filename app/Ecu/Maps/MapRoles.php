@@ -188,7 +188,8 @@ class MapRoles
     private static function qualifies(MapDef $map, Bin $bin, string $role): bool
     {
         $spec = self::SPEC[$role];
-        if (! preg_match($spec['name'], $map->name)) {
+        // guesses next to tables identified from the code (see Edc16Family) never stand in for a role
+        if (str_ends_with($map->name, '(heuristic)') || ! preg_match($spec['name'], $map->name)) {
             return false;
         }
         if ($role === 'duration') {
