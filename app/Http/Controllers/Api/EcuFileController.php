@@ -6,11 +6,16 @@ use App\Ecu\Analyzer;
 use App\Ecu\Bin;
 use App\Ecu\Dtc\DtcService;
 use App\Ecu\Dyno\DynoEstimator;
+use App\Ecu\Export\ExportBlocked;
+use App\Ecu\Export\ExportGate;
 use App\Ecu\Maps\MapDef;
+use App\Ecu\Maps\MapDefValidator;
 use App\Ecu\Xdf\XdfExporter;
 use App\Ecu\Xdf\XdfImporter;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\DynoRequest;
+use App\Http\Requests\UpdateEcuFileRequest;
+use App\Models\AuditLog;
 use App\Models\EcuFile;
 use App\Models\EcuFileVersion;
 use App\Models\MapDefinition;
@@ -52,6 +57,7 @@ class EcuFileController extends Controller
             'sha1' => sha1($data),
             'path' => $path,
         ])->analyze();
+        AuditLog::record('file.uploaded', $file, ['sha1' => $file->sha1, 'size' => $file->size, 'family' => $file->family_id, 'sw' => $file->sw]);
 
         return response()->json($this->payload($file), 201);
     }
@@ -61,30 +67,39 @@ class EcuFileController extends Controller
         return response()->json($this->payload($file));
     }
 
-    public function update(Request $request, EcuFile $file): JsonResponse
+    public function update(UpdateEcuFileRequest $request, EcuFile $file): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => ['sometimes', 'string', 'max:200'],
-            'notes' => ['sometimes', 'nullable', 'string'],
-            'maps' => ['sometimes', 'array'],
-        ]);
-        $file->fill($validated);
-        if (isset($validated['maps'])) {
-            $file->map_count = count($validated['maps']);
+        $file->fill($request->safe()->only(['name', 'notes']));
+        $maps = $request->normalizedMaps();
+        if ($maps !== null) {
+            $before = $file->map_count;
+            $file->fill(['maps' => $maps, 'map_count' => count($maps)]);
         }
+        $changed = array_keys($file->getDirty());
         $file->save();
+        if ($changed !== []) {
+            AuditLog::record('file.updated', $file, array_filter([
+                'fields' => array_values(array_diff($changed, ['map_count'])),
+                'mapsBefore' => $maps !== null ? $before : null,
+                'mapsAfter' => $maps !== null ? count($maps) : null,
+            ], fn (mixed $v): bool => $v !== null));
+        }
 
         return response()->json($this->payload($file));
     }
 
     public function reanalyze(EcuFile $file): JsonResponse
     {
-        return response()->json($this->payload($file->analyze()));
+        $file->analyze();
+        AuditLog::record('file.reanalyzed', $file, ['family' => $file->family_id, 'sw' => $file->sw, 'maps' => $file->map_count]);
+
+        return response()->json($this->payload($file));
     }
 
     public function destroy(EcuFile $file): Response
     {
         Storage::disk('local')->delete([$file->path, ...$file->versions->pluck('path')]);
+        AuditLog::record('file.deleted', $file, ['sha1' => $file->sha1, 'versions' => $file->versions->count()]);
         $file->delete();
 
         return response()->noContent();
@@ -117,20 +132,28 @@ class EcuFileController extends Controller
     }
 
     /**
-     * Store a modified version, optionally correcting checksums.
+     * Store a modified version. Everything goes through the ExportGate: checksums are corrected
+     * where possible and verified, and a file that cannot be verified needs an acknowledgement.
      */
-    public function saveVersion(Request $request, EcuFile $file): JsonResponse
+    public function saveVersion(Request $request, EcuFile $file, ExportGate $gate): JsonResponse
     {
         $request->validate([
             'file' => ['required', 'file', 'max:8192'],
             'label' => ['nullable', 'string', 'max:200'],
             'fix' => ['nullable', 'boolean'],
-            'changed_maps' => ['nullable', 'string'],
+            'acknowledge_unverified' => ['nullable', 'boolean'],
         ]);
-        $bin = new Bin($request->file('file')->getContent());
-        if ($bin->size !== $file->size) {
+        $original = $file->bin();
+        if (sha1($original->data) !== $file->sha1) {
+            AuditLog::record('file.integrity_failed', $file, ['expected' => $file->sha1, 'actual' => sha1($original->data)]);
+
+            return response()->json(['message' => 'The stored original no longer matches its recorded hash. Nothing was saved; restore the file from a backup.'], 409);
+        }
+        $modified = new Bin($request->file('file')->getContent());
+        if ($modified->size !== $file->size) {
             return response()->json(['message' => 'Modified file size differs from the original.'], 422);
         }
+        $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
 
         $dtc = new DtcService;
         $original = $file->bin();
@@ -153,14 +176,28 @@ class EcuFileController extends Controller
         }
 
         $path = 'bins/'.Str::uuid().'.bin';
-        Storage::disk('local')->put($path, $bin->data);
+        Storage::disk('local')->put($path, $export['bin']->data);
         $version = $file->versions()->create([
             'label' => $request->input('label') ?: 'Version '.($file->versions()->count() + 1),
             'path' => $path,
-            'sha1' => sha1($bin->data),
-            'checksum_fixed' => $fixed,
-            'checksums' => $analyzer->checksumReport($analyzer->family($file->family_id)?->checksum($bin), $bin),
-            'changed_maps' => json_decode($request->input('changed_maps', '[]'), true) ?: [],
+            'sha1' => sha1($export['bin']->data),
+            'checksum_fixed' => $export['corrected'],
+            'export_state' => $export['state'],
+            'unverified_reason' => $export['reason'],
+            'checksums' => $export['checksums'],
+            'changed_maps' => array_column($export['changes']['maps'], 'name'),
+            'changes' => $export['changes'],
+        ]);
+        AuditLog::record('version.saved', $file, [
+            'version' => $version->id,
+            'label' => $version->label,
+            'sha1' => $version->sha1,
+            'state' => $export['state'],
+            'acknowledgedUnverified' => $export['state'] === ExportGate::UNVERIFIED,
+            'reason' => $export['reason'],
+            'checksumCorrected' => $export['corrected'],
+            'changedBytes' => $export['changes']['changedBytes'] ?? null,
+            'maps' => $version->changed_maps,
         ]);
 
         return response()->json($version, 201);
@@ -169,7 +206,8 @@ class EcuFileController extends Controller
     public function downloadVersion(EcuFile $file, EcuFileVersion $version): Response
     {
         abort_unless($version->ecu_file_id === $file->id, 404);
-        $name = Str::slug($file->name.' '.$version->label, '_').($version->checksum_fixed ? '_CHK' : '_NOCHK').'.bin';
+        $name = Str::slug($file->name.' '.$version->label, '_').($version->export_state === ExportGate::VERIFIED ? '_CHK' : '_UNVERIFIED').'.bin';
+        AuditLog::record('version.downloaded', $file, ['version' => $version->id, 'sha1' => $version->sha1, 'state' => $version->export_state]);
 
         return response(Storage::disk('local')->get($version->path), 200, [
             'Content-Type' => 'application/octet-stream',
@@ -188,9 +226,20 @@ class EcuFileController extends Controller
     {
         abort_unless($version->ecu_file_id === $file->id, 404);
         Storage::disk('local')->delete($version->path);
+        AuditLog::record('version.deleted', $file, ['version' => $version->id, 'label' => $version->label, 'sha1' => $version->sha1]);
         $version->delete();
 
         return response()->noContent();
+    }
+
+    /**
+     * The file's audit trail, newest first.
+     */
+    public function audit(EcuFile $file): JsonResponse
+    {
+        return response()->json(
+            AuditLog::where('ecu_file_id', $file->id)->latest('id')->limit(200)->get(['id', 'action', 'meta', 'created_at'])
+        );
     }
 
     /**
@@ -206,8 +255,18 @@ class EcuFileController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $maps = array_values(array_filter($result['maps'], fn (MapDef $m): bool => $m->address + $m->byteSize() <= $file->size));
-        $file->user->mapDefinitions()->create([
+        $checker = new MapDefValidator($file->size);
+        $maps = [];
+        $rejected = [];
+        foreach ($result['maps'] as $map) {
+            $errors = $checker->errors($map->toArray());
+            if ($errors === []) {
+                $maps[] = $map;
+            } else {
+                $rejected[] = "Skipped \"{$map->name}\": ".implode(', ', $errors).'.';
+            }
+        }
+        $definition = $file->user->mapDefinitions()->create([
             'name' => $result['title'] ?: $request->file('file')->getClientOriginalName(),
             'sw' => $file->sw,
             'ecu_file_id' => $file->id,
@@ -217,9 +276,16 @@ class EcuFileController extends Controller
             'maps' => array_map(fn (MapDef $m): array => $m->toArray(), $maps),
         ]);
 
+        AuditLog::record('definition.imported', $file, [
+            'definition' => $definition->id,
+            'source' => $definition->source_filename,
+            'maps' => count($maps),
+            'skipped' => count($rejected),
+        ]);
+
         return response()->json([
             ...$this->payload($file->analyze()),
-            'importWarnings' => array_slice($importer->warnings, 0, 50),
+            'importWarnings' => array_slice([...$rejected, ...$importer->warnings], 0, 50),
             'imported' => count($maps),
         ]);
     }

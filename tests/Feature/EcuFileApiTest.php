@@ -58,22 +58,84 @@ class EcuFileApiTest extends TestCase
             ->assertUnprocessable();
     }
 
-    public function test_saves_version_and_downloads_it(): void
+    public function test_unverifiable_version_needs_acknowledgement(): void
     {
         $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
         $file = EcuFile::find($id);
         $modified = substr_replace($file->bin()->data, "\x10\x27", $this->mapAddress, 2);
+        $payload = fn (): array => ['file' => UploadedFile::fake()->createWithContent('m.bin', $modified), 'label' => 'Stage 1'];
 
-        $version = $this->postJson(route('files.versions.store', $file), [
-            'file' => UploadedFile::fake()->createWithContent('m.bin', $modified),
-            'label' => 'Stage 1',
-            'fix' => false,
-            'changed_maps' => json_encode(['Boost pressure target']),
-        ])->assertCreated()->assertJsonPath('label', 'Stage 1')->json();
+        // the synthetic dump has no checksum layout BinBench knows: blocked until acknowledged
+        $this->postJson(route('files.versions.store', $file), $payload())
+            ->assertUnprocessable()
+            ->assertJsonPath('needsAcknowledgement', true);
+        $this->assertSame(0, $file->versions()->count());
+
+        $version = $this->postJson(route('files.versions.store', $file), [...$payload(), 'acknowledge_unverified' => true, 'changed_maps' => json_encode(['Made up by the client'])])
+            ->assertCreated()
+            ->assertJsonPath('label', 'Stage 1')
+            ->assertJsonPath('export_state', 'unverified')
+            ->assertJsonPath('changes.changedBytes', 2)
+            ->assertJsonPath('changes.maps.0.name', 'Boost pressure target')
+            ->assertJsonPath('changed_maps', ['Boost pressure target'])
+            ->json();
+        $this->assertNotEmpty($version['unverified_reason']);
 
         $download = $this->get(route('files.versions.download', [$file, $version['id']]));
         $download->assertOk();
+        $this->assertStringContainsString('_UNVERIFIED.bin', $download->headers->get('Content-Disposition'));
         $this->assertSame($modified, $download->getContent());
+    }
+
+    public function test_refuses_to_save_when_stored_original_is_corrupt(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $file = EcuFile::find($id);
+        $modified = $file->bin()->data;
+        Storage::disk('local')->put($file->path, substr_replace($modified, "\0", 0x100, 1));
+
+        $this->postJson(route('files.versions.store', $file), ['file' => UploadedFile::fake()->createWithContent('m.bin', $modified), 'acknowledge_unverified' => true])
+            ->assertStatus(409);
+    }
+
+    public function test_rejects_maps_outside_the_file(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $maps = EcuFile::find($id)->maps;
+        $maps[0]['address'] = 0x7FFFE;
+        $maps[0]['rows'] = 5000;
+
+        $this->patchJson(route('files.update', $id), ['maps' => $maps])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrorFor('maps.0');
+        $this->assertNotSame(0x7FFFE, EcuFile::find($id)->maps[0]['address']);
+    }
+
+    public function test_stores_maps_normalized(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $maps = EcuFile::find($id)->maps;
+        $maps[0]['name'] = 'Boost target (edited)';
+        $maps[0]['injected'] = '<script>';
+
+        $this->patchJson(route('files.update', $id), ['maps' => $maps])
+            ->assertOk()
+            ->assertJsonPath('maps.0.name', 'Boost target (edited)')
+            ->assertJsonMissingPath('maps.0.injected');
+    }
+
+    public function test_xdf_import_skips_maps_that_do_not_fit(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $xdf = '<?xml version="1.0"?><XDFFORMAT version="1.60"><XDFHEADER><deftitle>Test</deftitle><BASEOFFSET offset="0" subtract="0" /></XDFHEADER>'
+            .'<XDFTABLE uniqueid="0x1"><title>Too far</title>'
+            .'<XDFAXIS id="z"><EMBEDDEDDATA mmedtypeflags="0x02" mmedaddress="0x7FFF0" mmedelementsizebits="16" mmedrowcount="4" mmedcolcount="4" /><MATH equation="X"><VAR id="X" /></MATH></XDFAXIS>'
+            .'</XDFTABLE></XDFFORMAT>';
+
+        $response = $this->postJson(route('files.xdf.import', $id), ['file' => UploadedFile::fake()->createWithContent('t.xdf', $xdf)])
+            ->assertOk()
+            ->assertJsonPath('imported', 0);
+        $this->assertStringContainsString('Skipped "Too far"', implode("\n", $response->json('importWarnings')));
     }
 
     public function test_rejects_version_with_different_size(): void

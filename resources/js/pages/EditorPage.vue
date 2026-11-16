@@ -242,11 +242,40 @@ const mainView = ref('maps');
 const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
 const side = ref('ECU');
+const history = ref(null);
+async function loadHistory() {
+    if (side.value !== 'Versions' || !ed.file) {
+        return;
+    }
+    history.value = await api.audit(ed.file.id).catch(() => []);
+}
+watch(side, () => {
+    history.value = null;
+    loadHistory();
+});
+
+function describeAudit({ action, meta }) {
+    const m = meta ?? {};
+    switch (action) {
+        case 'file.uploaded': return `Uploaded (SHA-1 ${m.sha1?.slice(0, 10)}…)`;
+        case 'file.updated': return m.mapsAfter != null ? `Maps edited (${m.mapsBefore} → ${m.mapsAfter})` : `Edited ${(m.fields ?? []).join(', ')}`;
+        case 'file.reanalyzed': return `Re-analyzed: ${m.maps} maps`;
+        case 'file.integrity_failed': return 'Stored original failed its hash check';
+        case 'version.saved': return `Saved "${m.label}" as ${m.state}${m.acknowledgedUnverified ? ' (acknowledged)' : ''}, ${m.changedBytes ?? '?'} bytes changed${m.checksumCorrected ? ', checksums corrected' : ''}`;
+        case 'version.downloaded': return `Downloaded version #${m.version} (${m.state})`;
+        case 'version.deleted': return `Deleted version "${m.label}"`;
+        case 'definition.imported': return `Imported ${m.source}: ${m.maps} maps${m.skipped ? `, ${m.skipped} skipped` : ''}`;
+        default: return action;
+    }
+}
 const saveDialog = ref(false);
 const fileMenu = ref(false);
 const fileMenuEl = ref(null);
 const saveLabel = ref('');
 const fixChecksum = ref(true);
+const blocked = ref(null); // { reason, checksums } when the export gate refused
+const acknowledge = ref(false);
+const blockedBlocks = computed(() => (blocked.value?.checksums?.blocks ?? []).filter((b) => !b.ok).slice(0, 6));
 const saving = ref(false);
 const notes = ref('');
 const newAddr = ref('');
@@ -322,16 +351,30 @@ async function saveVersion() {
             fix: fixChecksum.value && checksum.value?.canFix,
             changedMaps: [...changedNames.value, ...ed.changedFaultCodes.map((c) => `DTC ${c}`)],
         });
-        saveDialog.value = false;
-        toast(`Saved "${version.label}"${version.checksum_fixed ? ' with corrected checksums' : ''}`);
+        closeSaveDialog();
+        toast(version.export_state === 'verified'
+            ? `Saved "${version.label}": checksums verified${version.checksum_fixed ? ' after correction' : ''}`
+            : `Saved "${version.label}" as UNVERIFIED`);
         window.location.href = `/api/files/${ed.file.id}/versions/${version.id}/download`;
         ed.setFile(await api.file(ed.file.id));
         side.value = 'Versions';
+        loadHistory();
     } catch (e) {
-        toastError(e);
+        if (e.data?.needsAcknowledgement) {
+            blocked.value = { reason: e.message, checksums: e.data.checksums };
+            acknowledge.value = false;
+        } else {
+            toastError(e);
+        }
     } finally {
         saving.value = false;
     }
+}
+
+function closeSaveDialog() {
+    saveDialog.value = false;
+    blocked.value = null;
+    acknowledge.value = false;
 }
 
 async function openVersion(v) {

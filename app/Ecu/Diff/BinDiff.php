@@ -150,7 +150,7 @@ class BinDiff
      *
      * @return array<int, array{0: int, 1: int}>
      */
-    private static function changedRuns(Bin $a, Bin $b): array
+    public static function changedRuns(Bin $a, Bin $b): array
     {
         preg_match_all('/[^\x00]+/', $a->data ^ $b->data, $m, PREG_OFFSET_CAPTURE);
 
