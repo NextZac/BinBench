@@ -23,6 +23,12 @@ class DtcService
     /** Families whose P1xxx codes follow VAG numbering. */
     private const VAG_FAMILIES = ['me7'];
 
+    private const MONITOR_LABELS = [
+        'rear_o2' => 'Rear O₂ sensor',
+        'egr' => 'EGR',
+        'dpf' => 'DPF',
+    ];
+
     public function locator(string $familyId): ?DtcLocator
     {
         $class = self::LOCATORS[$familyId] ?? null;
@@ -49,14 +55,40 @@ class DtcService
         }
 
         $paths = [];
+        $detections = [];
         foreach ($table->paths as $path) {
             // 'value' is the stored number, 'code' its text form (P0301)
             $vag = in_array($familyId, self::VAG_FAMILIES, true);
             $codes = array_map(fn (array $c): array => ['value' => $c['code'], ...$c, ...DtcCatalog::describe($c['code'], $vag)], $path->codes);
             $reason = $this->protectionReason($path, $familyId);
+            $systems = [];
+            foreach ($path->pcodes() as $code) {
+                array_push($systems, ...DtcCatalog::monitorSystems($code));
+            }
+            if ($path->name !== null) {
+                if (preg_match('/\b(rear|bank\s*[12]\s*sensor\s*2|oxygen sensor.*sensor\s*2|lambda.*sensor\s*2)\b/i', $path->name)) {
+                    $systems[] = 'rear_o2';
+                }
+                if (preg_match('/\b(EGR|AGR|exhaust gas recirculat)/i', $path->name)) {
+                    $systems[] = 'egr';
+                }
+                if (preg_match('/\b(DPF|particulate filter|soot filter|diesel particulate)/i', $path->name)) {
+                    $systems[] = 'dpf';
+                }
+            }
+            $systems = array_values(array_unique($systems));
+            foreach ($systems as $system) {
+                $detections[$system] ??= ['id' => $system, 'label' => self::MONITOR_LABELS[$system], 'pathCount' => 0, 'codes' => []];
+                $detections[$system]['pathCount']++;
+                $detections[$system]['codes'] = array_values(array_unique([...$detections[$system]['codes'], ...array_map(
+                    fn (int $code): string => DtcCatalog::format($code),
+                    array_filter($path->pcodes(), fn (int $code): bool => in_array($system, DtcCatalog::monitorSystems($code), true)),
+                )]));
+            }
             $paths[] = [
                 ...$path->toArray(),
                 'codes' => $codes,
+                'monitorSystems' => $systems,
                 'protected' => $reason !== null,
                 'protectedReason' => $reason,
             ];
@@ -68,6 +100,7 @@ class DtcService
             'bigEndian' => $table->bigEndian,
             'notes' => $table->notes,
             'fieldHelp' => $table->fieldHelp,
+            'monitorDetections' => array_values($detections),
             'paths' => $paths,
         ];
     }

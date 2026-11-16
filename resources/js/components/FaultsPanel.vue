@@ -32,6 +32,13 @@
                 <summary class="cursor-pointer text-muted">How these tables were found</summary>
                 <p v-for="n in dtc.notes" :key="n" class="note mt-1.5">{{ n }}</p>
             </details>
+            <div v-if="dtc.monitorDetections?.length" class="border-b border-line px-3 py-2 text-[11px]">
+                <span class="mr-2 text-muted">DTC table references:</span>
+                <span v-for="detection in dtc.monitorDetections" :key="detection.id" class="status mr-1.5 text-muted" :title="detection.codes.length ? detection.codes.join(', ') : 'Identified from fault path name'">
+                    {{ detection.label }} · {{ detection.pathCount }} path{{ detection.pathCount === 1 ? '' : 's' }}
+                </span>
+                <span class="text-muted">References found do not confirm the monitor is currently enabled.</span>
+            </div>
             <div class="min-h-0 flex-1 overflow-auto scroll-thin">
                 <table class="w-full min-w-[720px] text-[12px]">
                     <thead class="sticky top-0 z-10 bg-panel-2 text-left">
@@ -54,6 +61,9 @@
                                 <td class="py-1.5 pr-3">
                                     <button class="cursor-pointer text-left hover:text-accent" :aria-expanded="open === row.path.index" @click="open = open === row.path.index ? null : row.path.index">{{ row.name }}</button>
                                     <div v-if="row.system !== row.name" class="text-[11px] text-muted">{{ row.system }}</div>
+                                    <div v-if="row.path.monitorSystems?.length" class="mt-1 flex gap-1">
+                                        <span v-for="system in row.path.monitorSystems" :key="system" class="status text-muted">{{ monitorLabels[system] }}</span>
+                                    </div>
                                 </td>
                                 <td class="py-1.5 pr-3">
                                     <span v-if="row.path.protected" class="status text-muted" :title="`Emissions monitoring (${row.path.protectedReason}): read-only`"><Icon name="alert" :size="12" />locked</span>
@@ -117,6 +127,7 @@ const filters = [
 ];
 const stateLabel = { active: 'active', hidden: 'code hidden', off: 'switched off', modified: 'changed' };
 const stateClass = { active: 'text-muted', hidden: 'text-mod', off: 'text-mod', modified: 'text-mod' };
+const monitorLabels = { rear_o2: 'Rear O₂', egr: 'EGR', dpf: 'DPF' };
 
 function readInt(buf, address, size) {
     let v = 0;
