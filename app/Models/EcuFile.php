@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
 use App\Ecu\Maps\MapDef;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -42,6 +44,27 @@ class EcuFile extends Model
         return $this->hasMany(EcuFileVersion::class)->latest();
     }
 
+    /**
+     * Definitions that apply to this file: imported for it, or for another read with the same
+     * software number. Newest first, so a newer import wins where two define the same address.
+     *
+     * @return Collection<int, MapDefinition>
+     */
+    public function definitions(?string $sw = null): Collection
+    {
+        $sw ??= $this->sw;
+
+        return MapDefinition::where('user_id', $this->user_id)
+            ->where(function (Builder $query) use ($sw): void {
+                $query->where('ecu_file_id', $this->id);
+                if ($sw) {
+                    $query->orWhere('sw', $sw);
+                }
+            })
+            ->latest()
+            ->get();
+    }
+
     public function bin(): Bin
     {
         return new Bin(Storage::disk('local')->get($this->path));
@@ -57,10 +80,8 @@ class EcuFile extends Model
         $sw = $analyzer->identify($bin)['ident']['sw'] ?? null;
 
         $known = [];
-        if ($sw) {
-            foreach (MapDefinition::where('sw', $sw)->where('user_id', $this->user_id)->latest()->get() as $definition) {
-                array_push($known, ...$definition->mapDefs());
-            }
+        foreach ($this->definitions($sw) as $definition) {
+            array_push($known, ...$definition->mapDefs());
         }
 
         $result = $analyzer->analyze($bin, $known);

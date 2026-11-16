@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
+use App\Ecu\Dtc\DtcService;
 use App\Ecu\Dyno\DynoEstimator;
 use App\Ecu\Export\ExportBlocked;
 use App\Ecu\Export\ExportGate;
@@ -154,15 +155,24 @@ class EcuFileController extends Controller
         }
         $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
 
-        try {
-            $export = $gate->prepare($original, $modified, (string) $file->family_id, $maps,
-                $request->boolean('fix', true), $request->boolean('acknowledge_unverified'));
-        } catch (ExportBlocked $e) {
+        $dtc = new DtcService;
+        $original = $file->bin();
+        $protected = $dtc->protectedChanges($original, $bin, $dtc->table($original, (string) $file->family_id), (string) $file->family_id);
+        if ($protected) {
             return response()->json([
-                'message' => $e->reason,
-                'needsAcknowledgement' => true,
-                'checksums' => $e->checksums,
+                'message' => 'Emissions-related fault paths were changed ('.implode(', ', array_slice($protected, 0, 8)).'). BinBench does not save files with emissions monitoring switched off.',
             ], 422);
+        }
+
+        $analyzer = new Analyzer;
+        $fixed = false;
+        if ($request->boolean('fix')) {
+            try {
+                $bin = $analyzer->fixChecksums($bin, $file->family_id);
+                $fixed = true;
+            } catch (\Throwable $e) {
+                return response()->json(['message' => 'Checksum correction failed: '.$e->getMessage()], 422);
+            }
         }
 
         $path = 'bins/'.Str::uuid().'.bin';
@@ -259,6 +269,7 @@ class EcuFileController extends Controller
         $definition = $file->user->mapDefinitions()->create([
             'name' => $result['title'] ?: $request->file('file')->getClientOriginalName(),
             'sw' => $file->sw,
+            'ecu_file_id' => $file->id,
             'family_id' => $file->family_id,
             'source_filename' => $request->file('file')->getClientOriginalName(),
             'map_count' => count($maps),
@@ -298,8 +309,8 @@ class EcuFileController extends Controller
     {
         return [
             ...$file->only(['id', 'name', 'original_filename', 'size', 'sha1', 'family', 'family_id', 'sw', 'ident', 'maps', 'checksums', 'notes', 'created_at']),
-            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'export_state', 'unverified_reason', 'checksums', 'changed_maps', 'changes', 'created_at']),
-            'definitions' => $file->sw ? MapDefinition::where('sw', $file->sw)->where('user_id', $file->user_id)->get(['id', 'name', 'source_filename', 'map_count', 'created_at']) : [],
+            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'checksums', 'changed_maps', 'created_at']),
+            'definitions' => $file->definitions()->map(fn (MapDefinition $d): array => $d->only(['id', 'name', 'source_filename', 'map_count', 'created_at']))->values(),
         ];
     }
 }

@@ -3,21 +3,78 @@
 @source '../js/**/*.vue';
 @source '../views/**/*.blade.php';
 
-@theme {
-    --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+/*
+ * BinBench theme. Two palettes (dark default, light) behind the same token names, switched with
+ * data-theme on <html>. Warm graphite and paper instead of blue-slate; one signal colour (amber,
+ * like a calibration label) and two data colours: modified data and the compare reference.
+ */
+@theme inline {
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
-    --color-bg: #0d1117;
-    --color-panel: #151b23;
-    --color-panel-2: #1c2430;
-    --color-line: #2a3442;
-    --color-ink: #e6edf3;
-    --color-muted: #8b98a8;
-    --color-accent: #f97316;
-    --color-accent-2: #fb923c;
-    --color-ok: #22c55e;
-    --color-bad: #ef4444;
-    --color-warn: #eab308;
+    --color-bg: var(--bb-bg);
+    --color-panel: var(--bb-panel);
+    --color-panel-2: var(--bb-panel-2);
+    --color-raised: var(--bb-raised);
+    --color-line: var(--bb-line);
+    --color-line-strong: var(--bb-line-strong);
+    --color-ink: var(--bb-ink);
+    --color-muted: var(--bb-muted);
+    --color-accent: var(--bb-accent);
+    --color-accent-fill: var(--bb-accent-fill);
+    --color-on-accent: var(--bb-on-accent);
+    --color-mod: var(--bb-mod);
+    --color-ref: var(--bb-ref);
+    --color-ok: var(--bb-ok);
+    --color-bad: var(--bb-bad);
+    --color-warn: var(--bb-warn);
+}
+
+:root,
+:root[data-theme='dark'] {
+    color-scheme: dark;
+    --bb-bg: #121314;
+    --bb-panel: #1a1b1d;
+    --bb-panel-2: #222326;
+    --bb-raised: #2b2c30;
+    --bb-line: #2f3135;
+    --bb-line-strong: #43464c;
+    --bb-ink: #e8e4dc;
+    --bb-muted: #9d998f;
+    --bb-accent: #e8b02f;
+    --bb-accent-fill: #e8b02f;
+    --bb-on-accent: #17140c;
+    --bb-mod: #f0743e;
+    --bb-ref: #55b4c9;
+    --bb-ok: #7bb86f;
+    --bb-bad: #e8604f;
+    --bb-warn: #dba53c;
+    --bb-heat-alpha: 0.4;
+    --bb-heat-ink: #f3f0e9;
+    --bb-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+:root[data-theme='light'] {
+    color-scheme: light;
+    --bb-bg: #ebe8e1;
+    --bb-panel: #f7f5f0;
+    --bb-panel-2: #ece9e2;
+    --bb-raised: #e1ddd3;
+    --bb-line: #d4cfc4;
+    --bb-line-strong: #b5afa1;
+    --bb-ink: #1d1e20;
+    --bb-muted: #5c584f;
+    --bb-accent: #8f6200;
+    --bb-accent-fill: #e8b02f;
+    --bb-on-accent: #17140c;
+    --bb-mod: #c2501b;
+    --bb-ref: #1c7a8f;
+    --bb-ok: #3d7a33;
+    --bb-bad: #bf3528;
+    --bb-warn: #8f6200;
+    --bb-heat-alpha: 0.5;
+    --bb-heat-ink: #16171a;
+    --bb-shadow: 0 8px 24px rgb(40 32 16 / 0.18);
 }
 
 html,
@@ -27,30 +84,117 @@ body,
 }
 
 body {
-    background: var(--color-bg);
-    color: var(--color-ink);
+    background: var(--bb-bg);
+    color: var(--bb-ink);
     font-family: var(--font-sans);
     font-size: 13px;
+    line-height: 1.45;
+    font-feature-settings: 'tnum' 1;
 }
 
-.btn {
-    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-panel-2 px-2.5 py-1.5 text-xs font-medium text-ink transition hover:border-accent/60 hover:bg-[#232d3b] disabled:cursor-not-allowed disabled:opacity-40;
+.font-mono {
+    font-feature-settings: 'tnum' 1, 'zero' 1;
 }
 
-.btn-primary {
-    @apply border-accent bg-accent text-black hover:bg-accent-2;
+:focus-visible {
+    outline: 2px solid var(--bb-accent-fill);
+    outline-offset: 1px;
 }
 
-.btn-sm {
-    @apply px-2 py-1 text-[11px];
+::selection {
+    background: color-mix(in srgb, var(--bb-accent-fill) 35%, transparent);
 }
 
-.input {
-    @apply rounded-md border border-line bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent;
+@layer components {
+    /* Buttons: flat, hairline border, small radius. One filled style for the main action only. */
+    .btn {
+        @apply inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-[3px] border border-line bg-panel px-2.5 text-[12px] font-medium whitespace-nowrap text-ink transition-colors duration-100 hover:border-line-strong hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-panel;
+    }
+
+    .btn-primary {
+        @apply border-accent-fill bg-accent-fill text-on-accent hover:border-accent-fill hover:bg-accent-fill hover:brightness-105;
+    }
+
+    .btn-quiet {
+        @apply border-transparent bg-transparent hover:border-line hover:bg-raised;
+    }
+
+    .btn-sm {
+        @apply h-6 px-2 text-[11px];
+    }
+
+    .btn-icon {
+        @apply w-7 justify-center px-0;
+    }
+
+    .btn-danger {
+        @apply hover:border-bad/60 hover:text-bad;
+    }
+
+    .input {
+        @apply h-7 rounded-[3px] border border-line bg-bg px-2 text-[12px] text-ink outline-none transition-colors duration-100 placeholder:text-muted/70 focus:border-accent-fill;
+    }
+
+    textarea.input {
+        @apply h-auto py-1.5;
+    }
+
+    select.input {
+        @apply cursor-pointer pr-6;
+    }
+
+    .menu-item {
+        @apply flex w-full cursor-pointer items-center gap-2 px-3 py-1.5 text-left text-ink hover:bg-raised;
+    }
+
+    /* Small-caps section label used instead of bold headings everywhere. */
+    .label {
+        @apply text-[11px] font-medium tracking-[0.04em] text-muted;
+        font-variant: all-small-caps;
+        font-size: 12px;
+    }
+
+    /* Tabs: text with an underline, no filled pills. */
+    .tab {
+        @apply relative inline-flex h-full cursor-pointer items-center px-2.5 text-[12px] font-medium text-muted transition-colors duration-100 hover:text-ink;
+    }
+
+    .tab[aria-selected='true'] {
+        @apply text-ink;
+        box-shadow: inset 0 -2px 0 var(--bb-accent-fill);
+    }
+
+    /* Segmented switch for view modes. */
+    .seg {
+        @apply inline-flex h-7 items-stretch rounded-[3px] border border-line bg-bg p-px;
+    }
+
+    .seg > button {
+        @apply cursor-pointer rounded-[2px] px-2 text-[11px] font-medium text-muted transition-colors duration-100 hover:text-ink;
+    }
+
+    .seg > button[aria-pressed='true'] {
+        @apply bg-raised text-ink;
+    }
+
+    /* Status words (OK / mod / ref ...) set in mono, no pills. */
+    .status {
+        @apply inline-flex items-center gap-1 font-mono text-[11px] font-medium;
+    }
+
+    /* Note with a coloured rule on the left instead of a tinted box. */
+    .note {
+        @apply border-l-2 border-warn py-0.5 pl-2 text-[11px] text-muted;
+    }
+
+    .kbd {
+        @apply rounded-[2px] border border-line bg-panel-2 px-1 font-mono text-[10px] text-muted;
+    }
 }
 
-.chip {
-    @apply inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase;
+.scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--bb-line-strong) transparent;
 }
 
 .scroll-thin::-webkit-scrollbar {
@@ -59,6 +203,15 @@ body {
 }
 
 .scroll-thin::-webkit-scrollbar-thumb {
-    background: #2a3442;
-    border-radius: 4px;
+    background: var(--bb-line-strong);
+    border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0s !important;
+        animation-duration: 0s !important;
+    }
 }

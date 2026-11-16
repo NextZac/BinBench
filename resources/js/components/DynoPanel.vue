@@ -21,12 +21,12 @@
             <!-- maps used + notes -->
             <div class="border-t border-line px-3 py-2">
                 <div class="mb-1.5 flex justify-end">
-                    <span v-if="result.calibrated" class="chip bg-ok/15 text-ok">Calibrated to stock power</span>
-                    <span v-else class="chip bg-panel-2 text-muted">Uncalibrated</span>
+                    <span v-if="result.calibrated" class="status text-ok"><Icon name="check" :size="12" />calibrated to stock power</span>
+                    <span v-else class="status text-warn" title="Enter the stock power above to scale the estimate">uncalibrated: enter stock power</span>
                 </div>
                 <RolePicker :roles="result.roles" :choices="engine.roles" />
             </div>
-            <div v-for="n in result.notes" :key="n" class="mx-3 mb-2 rounded border border-warn/30 bg-warn/10 p-2 text-[11px] text-yellow-200">{{ n }}</div>
+            <div v-for="n in result.notes" :key="n" class="note mx-3 mb-2">{{ n }}</div>
         </template>
     </div>
 </template>
@@ -39,6 +39,7 @@ import { useEditor } from '../stores/editor';
 import DynoChart from './DynoChart.vue';
 import EngineInputs from './EngineInputs.vue';
 import RolePicker from './RolePicker.vue';
+import Icon from './Icon.vue';
 
 const ed = useEditor();
 const result = ref(null);

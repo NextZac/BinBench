@@ -3,9 +3,9 @@
         <div class="flex items-center gap-2 border-b border-line bg-panel px-3 py-2 text-[11px]">
             <span class="text-muted">Go to</span>
             <input v-model="gotoText" class="input w-28 font-mono" placeholder="0x7A326" @keydown.enter="goto">
-            <button class="btn btn-sm" @click="base = Math.max(0, base - LINES * 16)">◀ Page</button>
-            <button class="btn btn-sm" @click="base = Math.min((ed.current?.length ?? 16) - 16, base + LINES * 16)">Page ▶</button>
-            <span class="text-muted">Map bytes are outlined; changed bytes are orange.</span>
+            <button class="btn btn-sm" aria-label="Previous page" @click="base = Math.max(0, base - LINES * 16)"><Icon name="chevronLeft" :size="12" />Prev</button>
+            <button class="btn btn-sm" aria-label="Next page" @click="base = Math.min((ed.current?.length ?? 16) - 16, base + LINES * 16)">Next<Icon name="chevronRight" :size="12" /></button>
+            <span class="text-muted">Map bytes are shaded, edited bytes are coloured.</span>
             <label class="ml-auto flex items-center gap-1 text-muted"><input v-model="wordMode" type="checkbox"> 16-bit words ({{ map?.be ? 'BE' : 'LE' }})</label>
         </div>
         <div class="min-h-0 flex-1 overflow-auto p-3 font-mono text-[11px] leading-5 scroll-thin">
@@ -13,7 +13,7 @@
                 <span class="text-muted">{{ row.addr.toString(16).toUpperCase().padStart(6, '0') }}</span>
                 <span class="flex gap-[3px]">
                     <span v-for="cell in row.cells" :key="cell.addr" :title="'0x' + cell.addr.toString(16).toUpperCase()"
-                        :class="[cell.inMap ? 'bg-sky-500/20' : '', cell.changed ? 'text-accent font-bold' : 'text-ink/85']">{{ cell.text }}</span>
+                        :class="[cell.inMap ? 'bg-ref/15' : '', cell.changed ? 'font-semibold text-mod' : 'text-ink/85']">{{ cell.text }}</span>
                 </span>
                 <span class="text-muted">{{ row.ascii }}</span>
             </div>
@@ -25,6 +25,7 @@
 import { computed, ref, watch } from 'vue';
 import { mapRange } from '../lib/binary';
 import { useEditor } from '../stores/editor';
+import Icon from './Icon.vue';
 
 const props = defineProps({ map: { type: Object, default: null } });
 const ed = useEditor();

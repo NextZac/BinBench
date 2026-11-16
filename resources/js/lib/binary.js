@@ -84,6 +84,26 @@ export function readAxis(buf, axis, count) {
     return Array.from({ length: count }, (_, i) => toPhys(readRaw(buf, axis.address + i * size, axis.dtype, axis.be), axis.factor, axis.offset));
 }
 
+/** An axis whose breakpoints are stored in the file (not fixed labels from a definition). */
+export const axisEditable = (axis) => !!axis && axis.address !== null && axis.address !== undefined && !axis.values;
+
+/** Byte range [a, b) of a stored axis, or null. */
+export function axisRange(axis, count) {
+    return axisEditable(axis) ? [axis.address, axis.address + count * typeSize(axis.dtype)] : null;
+}
+
+/** Write one breakpoint (physical value); returns the value actually stored after rounding/clamping. */
+export function writeAxisValue(buf, axis, i, phys) {
+    const off = axis.address + i * typeSize(axis.dtype);
+    writeRaw(buf, off, axis.dtype, axis.be, toRaw(phys, axis.factor, axis.offset));
+    return toPhys(readRaw(buf, off, axis.dtype, axis.be), axis.factor, axis.offset);
+}
+
+/** Data range plus the ranges of stored axes: everything an edit of this map can touch. */
+export function mapRanges(map) {
+    return [mapRange(map), axisRange(map.x, map.cols), axisRange(map.y, map.rows)].filter(Boolean);
+}
+
 export function mapRange(map) {
     return [map.address, map.address + map.rows * map.cols * typeSize(map.dtype)];
 }
