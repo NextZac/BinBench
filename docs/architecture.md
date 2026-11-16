@@ -114,6 +114,14 @@ See `docs/checksums.md`.
 - `ecu_file_versions`: one saved modified file; label, sha1, checksum report, export state,
   server-computed change summary.
 - `map_definitions`: imported definition sets per SW number and owner.
+- `audit_logs`: append-only trail (uploads, map edits, version saves with gate state and
+  acknowledgement, downloads, deletions, definition imports, logins). No foreign keys, so entries
+  outlive the file or user. Shown per file under Versions → History.
+
+Maps from the client (`PATCH /files/{id}`, XDF import) pass `Maps\MapDefValidator` before they
+are stored: known data types, at most 1024 per dimension and 65,536 cells, finite scaling, data
+and axes inside the file, one axis point per row/column. They are then rebuilt through `MapDef`,
+so unknown keys are dropped.
 
 ## Tests
 

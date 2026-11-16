@@ -66,6 +66,12 @@ function normalized() {
     f.kind = f.rows > 1 && f.cols > 1 ? 'map' : (f.rows * f.cols > 1 ? 'curve' : 'value');
     f.source = f.source === 'scan' || f.source === 'pattern' ? 'user' : f.source;
     f.confidence = 1;
+    // an axis must have one point per column (x) / row (y); fixed labels cannot be resized
+    for (const [ax, count] of [['x', f.cols], ['y', f.rows]]) {
+        if (f[ax] && f[ax].count !== count) {
+            f[ax] = f[ax].address != null && count > 1 ? { ...f[ax], count, values: null } : null;
+        }
+    }
     return f;
 }
 

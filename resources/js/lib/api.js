@@ -54,6 +54,7 @@ export const api = {
         return request('POST', '/files', form);
     },
     update: (id, data) => request('PATCH', `/files/${id}`, data),
+    audit: (id) => request('GET', `/files/${id}/audit`),
     remove: (id) => request('DELETE', `/files/${id}`),
     reanalyze: (id) => request('POST', `/files/${id}/reanalyze`),
     raw: (id) => request('GET', `/files/${id}/raw`, null, { raw: true }),

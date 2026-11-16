@@ -98,6 +98,46 @@ class EcuFileApiTest extends TestCase
             ->assertStatus(409);
     }
 
+    public function test_rejects_maps_outside_the_file(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $maps = EcuFile::find($id)->maps;
+        $maps[0]['address'] = 0x7FFFE;
+        $maps[0]['rows'] = 5000;
+
+        $this->patchJson(route('files.update', $id), ['maps' => $maps])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrorFor('maps.0');
+        $this->assertNotSame(0x7FFFE, EcuFile::find($id)->maps[0]['address']);
+    }
+
+    public function test_stores_maps_normalized(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $maps = EcuFile::find($id)->maps;
+        $maps[0]['name'] = 'Boost target (edited)';
+        $maps[0]['injected'] = '<script>';
+
+        $this->patchJson(route('files.update', $id), ['maps' => $maps])
+            ->assertOk()
+            ->assertJsonPath('maps.0.name', 'Boost target (edited)')
+            ->assertJsonMissingPath('maps.0.injected');
+    }
+
+    public function test_xdf_import_skips_maps_that_do_not_fit(): void
+    {
+        $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');
+        $xdf = '<?xml version="1.0"?><XDFFORMAT version="1.60"><XDFHEADER><deftitle>Test</deftitle><BASEOFFSET offset="0" subtract="0" /></XDFHEADER>'
+            .'<XDFTABLE uniqueid="0x1"><title>Too far</title>'
+            .'<XDFAXIS id="z"><EMBEDDEDDATA mmedtypeflags="0x02" mmedaddress="0x7FFF0" mmedelementsizebits="16" mmedrowcount="4" mmedcolcount="4" /><MATH equation="X"><VAR id="X" /></MATH></XDFAXIS>'
+            .'</XDFTABLE></XDFFORMAT>';
+
+        $response = $this->postJson(route('files.xdf.import', $id), ['file' => UploadedFile::fake()->createWithContent('t.xdf', $xdf)])
+            ->assertOk()
+            ->assertJsonPath('imported', 0);
+        $this->assertStringContainsString('Skipped "Too far"', implode("\n", $response->json('importWarnings')));
+    }
+
     public function test_rejects_version_with_different_size(): void
     {
         $id = $this->postJson(route('files.store'), ['file' => $this->edc15Upload()])->json('id');

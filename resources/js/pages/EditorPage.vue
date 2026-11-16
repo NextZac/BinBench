@@ -147,6 +147,16 @@
                             </div>
                         </div>
                         <div v-if="!ed.file.versions?.length" class="text-muted">No saved versions yet.</div>
+
+                        <h3 class="pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted">History</h3>
+                        <div v-if="history === null" class="text-muted">Loading…</div>
+                        <div v-else-if="!history.length" class="text-muted">Nothing recorded yet.</div>
+                        <ul v-else class="space-y-1">
+                            <li v-for="h in history" :key="h.id" class="flex gap-2 text-[11px]">
+                                <span class="shrink-0 text-muted">{{ new Date(h.created_at).toLocaleString() }}</span>
+                                <span>{{ describeAudit(h) }}</span>
+                            </li>
+                        </ul>
                     </div>
 
                     <!-- definition -->
@@ -230,6 +240,32 @@ const mainView = ref('maps');
 const diffVersion = ref(null);
 const sideTabs = ['ECU', 'Checksum', 'Versions', 'Definition'];
 const side = ref('ECU');
+const history = ref(null);
+async function loadHistory() {
+    if (side.value !== 'Versions' || !ed.file) {
+        return;
+    }
+    history.value = await api.audit(ed.file.id).catch(() => []);
+}
+watch(side, () => {
+    history.value = null;
+    loadHistory();
+});
+
+function describeAudit({ action, meta }) {
+    const m = meta ?? {};
+    switch (action) {
+        case 'file.uploaded': return `Uploaded (SHA-1 ${m.sha1?.slice(0, 10)}…)`;
+        case 'file.updated': return m.mapsAfter != null ? `Maps edited (${m.mapsBefore} → ${m.mapsAfter})` : `Edited ${(m.fields ?? []).join(', ')}`;
+        case 'file.reanalyzed': return `Re-analyzed: ${m.maps} maps`;
+        case 'file.integrity_failed': return 'Stored original failed its hash check';
+        case 'version.saved': return `Saved "${m.label}" as ${m.state}${m.acknowledgedUnverified ? ' (acknowledged)' : ''}, ${m.changedBytes ?? '?'} bytes changed${m.checksumCorrected ? ', checksums corrected' : ''}`;
+        case 'version.downloaded': return `Downloaded version #${m.version} (${m.state})`;
+        case 'version.deleted': return `Deleted version "${m.label}"`;
+        case 'definition.imported': return `Imported ${m.source}: ${m.maps} maps${m.skipped ? `, ${m.skipped} skipped` : ''}`;
+        default: return action;
+    }
+}
 const saveDialog = ref(false);
 const saveLabel = ref('');
 const fixChecksum = ref(true);
@@ -314,6 +350,7 @@ async function saveVersion() {
         window.location.href = `/api/files/${ed.file.id}/versions/${version.id}/download`;
         ed.setFile(await api.file(ed.file.id));
         side.value = 'Versions';
+        loadHistory();
     } catch (e) {
         if (e.data?.needsAcknowledgement) {
             blocked.value = { reason: e.message, checksums: e.data.checksums };

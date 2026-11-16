@@ -16,12 +16,12 @@ debt that blocks new platforms.
 | 4 | **EDC16C and EDC17 cannot be corrected, EDC16C not even checked.** `Edc16Checksum` only knows VAG EDC16U and is unverified; `Edc17Checksum` skips RSA and monitoring checksums. | `app/Ecu/Checksum` | Every BMW/PSA EDC16 and every EDC17 export depends on the flash tool. |
 | 5 | **The audit trail is supplied by the browser.** `changed_maps` on a version is whatever the client sent; the server never diffed the bytes. | `saveVersion` | The record of what a customer file contains cannot be trusted. **Fixed in increment 1.** |
 | 6 | **ME7 RSA re-signing is not reproducible.** Like ME7Sum, it generates a new random key and replaces the modulus, so two corrections of the same file differ in ~256 bytes. | `Me7Checksum::rsaSign` | Byte diffs that cannot be explained or reproduced; clashes with "never silently change bytes". |
-| 7 | **Map definitions from the client are stored unvalidated.** `PATCH /files/{id}` accepts any `maps` array: no bounds on address, rows, cols or type. | `EcuFileController::update` | Out-of-range reads, memory exhaustion (rows × cols), corrupt definitions feeding Stage 1. |
+| 7 | **Map definitions from the client are stored unvalidated.** `PATCH /files/{id}` accepts any `maps` array: no bounds on address, rows, cols or type. | `EcuFileController::update` | Out-of-range reads, memory exhaustion (rows × cols), corrupt definitions feeding Stage 1. **Fixed in increment 2.** |
 | 8 | **Identification is a text search.** EDC16/EDC17 are detected by the string `EDC16`/`EDC17` anywhere in the file. No file kind (full, calibration-only, EEPROM), no calibration ID, no size/layout check. | `Edc16Family`, `Edc17Family`, `IdStrings` | Wrong family, wrong byte order, wrong checksum module on a look-alike file. |
 | 9 | **Files at rest are plain and unbacked.** Customer dumps sit unencrypted on the local disk, the stored SHA-1 is never re-checked on read, and there is no backup job. | `Storage::disk('local')` | Data loss or leak of customer files; silent corruption of a stock read. |
 | 10 | **Everything runs inside the web request.** Analysis, map scan and checksum runs are synchronous, and every API call loads the full `maps` JSON (2 MB for a 3,000-map XDF). | `EcuFile::analyze`, controllers | Timeouts on 4–8 MB EDC17/MED17 files; blocks the newer platforms. |
 
-Smaller findings: `APP_DEBUG=true` in `.env.example`; no roles (every user is equal) and no password
+Smaller findings: `APP_DEBUG=true` in `.env.example` (fixed in increment 2); no roles (every user is equal) and no password
 reset; versions always diff against stock, with no parent chain (stock → v1 → v2); 8 MB upload cap
 is below some MED17/MD1 flash sizes.
 
@@ -51,7 +51,7 @@ Score = (career value × reliability gain) ÷ effort, each 1–5. Higher is bett
 | # | Item | Career | Reliab. | Effort | Score | Notes |
 |---|---|---|---|---|---|---|
 | 1 | **Export gate, server-side change record, golden-fixture harness** | 5 | 5 | 2 | **12.5** | Increment 1 (done). Risks 1, 2, 5. |
-| 2 | **Validate stored map definitions; debug off; audit log table** | 3 | 4 | 1 | **12.0** | Quick security wins. Risk 7. |
+| 2 | **Validate stored map definitions; debug off; audit log table** | 3 | 4 | 1 | **12.0** | Increment 2 (done). Risk 7. |
 | 3 | **Identification v2**: declarative signatures, file kind (full / calibration / EEPROM), calibration ID, explicit unknown path | 4 | 4 | 2 | **8.0** | Risk 8. Prerequisite for every new platform. |
 | 4 | **`role` field on maps + confidence gate for Stage 1** (no automatic edits on guessed names without confirmation) | 3 | 5 | 2 | **7.5** | Risk 3. |
 | 5 | **EDC16C (BMW) checksum module**, verify then correct | 5 | 5 | 4 | **6.3** | Risk 4. Needs stock + corrected pairs from you. |

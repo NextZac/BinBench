@@ -34,6 +34,7 @@ Route::middleware('auth')->group(function () {
             Route::delete('versions/{version}', 'destroyVersion')->name('versions.destroy');
             Route::post('xdf', 'importXdf')->name('xdf.import');
             Route::get('xdf', 'exportXdf')->name('xdf.export');
+            Route::get('audit', 'audit')->name('audit');
         });
 
         Route::post('files/{file}/diff', DiffController::class)->name('files.diff');

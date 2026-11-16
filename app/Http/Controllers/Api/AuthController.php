@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -37,9 +38,11 @@ class AuthController extends Controller
         ]);
 
         if (! Auth::attempt($credentials, $request->boolean('remember'))) {
+            AuditLog::record('auth.login_failed', meta: ['email' => mb_strtolower($credentials['email'])]);
             throw ValidationException::withMessages(['email' => 'These credentials do not match our records.']);
         }
         $request->session()->regenerate();
+        AuditLog::record('auth.login');
 
         return $this->show($request);
     }
@@ -68,12 +71,16 @@ class AuthController extends Controller
         ]);
         Auth::login($user);
         $request->session()->regenerate();
+        AuditLog::record('auth.registered', user: $user);
 
         return $this->show($request);
     }
 
     public function logout(Request $request): JsonResponse
     {
+        if ($request->user()) {
+            AuditLog::record('auth.logout');
+        }
         Auth::guard('web')->logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
