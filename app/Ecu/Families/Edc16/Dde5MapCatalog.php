@@ -97,20 +97,34 @@ class Dde5MapCatalog
     public static function maps(Bin $bin, ?string $software): array
     {
         $maps = [];
-        foreach (self::TABLES[$software] ?? [] as $cpu => [$name, $category, $value, $first, $second, $readBy]) {
-            $header = BmwEdc16cLayout::cpuToFile($cpu);
-            if ($header === null) {
-                continue;
+        foreach (array_keys(self::TABLES[$software] ?? []) as $cpu) {
+            $map = self::map($bin, (string) $software, $cpu);
+            if ($map !== null) {
+                $maps[] = $map;
             }
-            $map = $second === null ? self::curve($bin, $header, $name, $category, $value, $first) : self::map2d($bin, $header, $name, $category, $value, $first, $second);
-            if ($map === null) {
-                continue;
-            }
-            $map->description = sprintf('Read by %s. Use site verified in the code; meaning and units inferred from it and the value ranges.', $readBy);
-            $maps[] = $map;
         }
 
         return $maps;
+    }
+
+    /**
+     * Map definition of one named table, read at $at (a file offset; the table's own place by default,
+     * or a copy of it elsewhere).
+     */
+    public static function map(Bin $bin, string $software, int $cpu, ?int $at = null): ?MapDef
+    {
+        $entry = self::TABLES[$software][$cpu] ?? null;
+        $header = $at ?? BmwEdc16cLayout::cpuToFile($cpu);
+        if ($entry === null || $header === null) {
+            return null;
+        }
+        [$name, $category, $value, $first, $second, $readBy] = $entry;
+        $map = $second === null ? self::curve($bin, $header, $name, $category, $value, $first) : self::map2d($bin, $header, $name, $category, $value, $first, $second);
+        if ($map !== null) {
+            $map->description = sprintf('Read by %s. Use site verified in the code; meaning and units inferred from it and the value ranges.', $readBy);
+        }
+
+        return $map;
     }
 
     /**

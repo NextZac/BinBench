@@ -6,9 +6,10 @@ use App\Ecu\Bin;
 use App\Ecu\Checksum\Edc16cBmwChecksum;
 use App\Ecu\Families\Edc16Family;
 use App\Ecu\Maps\MapDef;
+use App\Ecu\Patches\Dde5CruiseSwitchMultimap;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
-use Tests\Support\SyntheticBin;
+use Tests\Support\SyntheticDde5;
 
 /**
  * BMW EDC16C (DDE5) 1.5 MB full read: split address space (external flash at CPU 0x800000 = file
@@ -16,78 +17,18 @@ use Tests\Support\SyntheticBin;
  */
 class Edc16cBmwTest extends TestCase
 {
-    private const SIZE = 0x170000;
+    private const SIZE = SyntheticDde5::SIZE;
 
-    private const MAGIC = "\xFA\xDE\xCA\xFE\xCA\xFE\xAF\xFE";
-
-    /** [header marker file offset, CPU start, CPU end inclusive] as in SW 1037361878. */
-    private const BLOCKS = [
-        [0x75D8, 0x0, 0x7FBF],
-        [0x813C, 0x8000, 0x6FFFF],
-        [0xB003C, 0x840000, 0x87FFFB],
-        [0x150080, 0x8DFF80, 0x8FFBFB],
-    ];
-
-    /** Rail pressure target of SW 1037361878 (CPU 0x8FC9C6). */
-    private const RAIL = 0x16C9C6;
+    private const RAIL = SyntheticDde5::RAIL;
 
     private function file(int $cpu): int
     {
-        return $cpu < 0x800000 ? $cpu : $cpu - 0x790000;
+        return SyntheticDde5::file($cpu);
     }
 
-    private function lisAddi(int $register, int $address): array
+    private function dump(string $software = '1037361878', bool $multimapSites = false): Bin
     {
-        return [
-            (15 << 26) | ($register << 21) | ((($address + 0x8000) >> 16) & 0xFFFF),
-            (14 << 26) | ($register << 21) | ($register << 16) | ($address & 0xFFFF),
-        ];
-    }
-
-    /** 2D table [nx][ny][rpm][quantity][data] at a file offset. */
-    private function table(SyntheticBin $bin, int $at, int $n, int $base): void
-    {
-        $rpm = array_map(fn (int $i): int => 500 + 300 * $i, range(0, $n - 1));
-        $quantity = array_map(fn (int $i): int => 500 * $i, range(0, $n - 1));
-        $data = [];
-        foreach (range(0, $n - 1) as $r) {
-            foreach (range(0, $n - 1) as $q) {
-                $data[] = $base + 300 * $r + 200 * $q;
-            }
-        }
-        $bin->words($at, [$n, $n, ...$rpm, ...$quantity, ...$data], true);
-    }
-
-    private function closeBlocks(string $data): string
-    {
-        foreach (self::BLOCKS as [, $start, $end]) {
-            $s = $this->file($start);
-            $e = $this->file($end);
-            $data = substr_replace($data, "\0\0\0\0", $e - 3, 4);
-            $sum = array_sum(unpack('N*', substr($data, $s, $e + 1 - $s))) & 0xFFFFFFFF;
-            $data = substr_replace($data, pack('N', (0xD01FE500 - $sum) & 0xFFFFFFFF), $e - 3, 4);
-        }
-
-        return $data;
-    }
-
-    private function dump(string $software = '1037361878'): Bin
-    {
-        $bin = new SyntheticBin(self::SIZE);
-        $bin->ascii(0x8C5A6, 'BOSCH EDC16C/C (BMW) MPC555/RevG-K3')
-            ->ascii(0x76000, '0281011414')
-            ->ascii(0x150054, $software.'388AC62A');
-        foreach (self::BLOCKS as [$marker, $start, $end]) {
-            $bin->words($marker - 8, [$start >> 16, $start & 0xFFFF, $end >> 16, $end & 0xFFFF], true)->ascii($marker, self::MAGIC);
-        }
-        // code in the external application loads the rail table and a second table; a third is never referenced
-        $code = [...$this->lisAddi(5, 0x8FC9C6), 0x48000001, ...$this->lisAddi(5, 0x8F1000), 0x48000001];
-        $bin->ascii(0xB1000, pack('N*', ...$code));
-        $this->table($bin, self::RAIL, 16, 3000);
-        $this->table($bin, $this->file(0x8F1000), 8, 1000);
-        $this->table($bin, $this->file(0x8F2000), 8, 1000);
-
-        return new Bin($this->closeBlocks($bin->data()));
+        return new Bin(SyntheticDde5::build($software, $multimapSites));
     }
 
     public function test_checks_every_block_from_its_header(): void
@@ -168,5 +109,57 @@ class Edc16cBmwTest extends TestCase
 
         $this->assertCount(2, $maps);
         $this->assertNotContains('catalog', array_map(fn (MapDef $map): string => $map->source, $maps));
+    }
+
+    /**
+     * @param  array<int, array{address: int, bytes: string}>  $writes
+     */
+    private function apply(Bin $bin, array $writes): Bin
+    {
+        foreach ($writes as $write) {
+            $bin = $bin->withPatch($write['address'], $write['bytes']);
+        }
+
+        return $bin;
+    }
+
+    public function test_multimap_switches_each_table_load_through_a_stub(): void
+    {
+        $stock = $this->dump(multimapSites: true);
+        $patch = new Dde5CruiseSwitchMultimap;
+        $this->assertSame('available', $patch->status($stock)['status']);
+
+        $patched = $this->apply($stock, $patch->install($stock));
+
+        $this->assertSame('installed', $patch->status($patched)['status']);
+        // the launch-curve addi at 0x85624C now branches to the first stub at 0x875000
+        $this->assertSame(0x4801EDB4, $patched->u32($this->file(0x85624C), true));
+        $this->assertSame([0x888D8A34, 0x5484177A, 0x3C840087, 0x80845100, 0x4BFE1240], array_values(unpack('N5', $patched->slice($this->file(0x875000), 20))));
+        $this->assertSame([0x8E8236, 0x875200], array_values(unpack('N2', $patched->slice($this->file(0x875100), 8))));
+        $this->assertSame($stock->slice($this->file(0x8E8236), 86), $patched->slice($this->file(0x875200), 86), 'Map 2 starts as a copy');
+        $this->assertTrue((new Edc16cBmwChecksum)->fix($patched) instanceof Bin);
+    }
+
+    public function test_multimap_uninstall_restores_the_stock_read_and_lists_both_maps(): void
+    {
+        $stock = $this->dump(multimapSites: true);
+        $patch = new Dde5CruiseSwitchMultimap;
+        $patched = $this->apply($stock, $patch->install($stock));
+
+        $this->assertSame($stock->data, $this->apply($patched, $patch->uninstall($patched))->data);
+        $names = array_map(fn (MapDef $map): string => $map->name, $patch->maps($patched));
+        $this->assertCount(24, $names);
+        $this->assertContains('Map 2 · Boost pressure limit (atm. pressure)', $names);
+    }
+
+    public function test_multimap_is_not_offered_on_changed_code_or_other_software(): void
+    {
+        $patch = new Dde5CruiseSwitchMultimap;
+
+        $this->assertStringContainsString('this file is 1037399999', $patch->status($this->dump('1037399999', true))['reason']);
+        $changed = $this->dump(multimapSites: true)->withPatch($this->file(0x855470), "\x60\x00\x00\x00");
+        $this->assertStringContainsString('0x855470 is not the stock table load', $patch->status($changed)['reason']);
+        $used = $this->dump(multimapSites: true)->withPatch($this->file(0x876000), "\x00");
+        $this->assertStringContainsString('already in use', $patch->status($used)['reason']);
     }
 }

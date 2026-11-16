@@ -73,7 +73,8 @@ const support = [
     ['ME7.x', 'VAG 1.8T, V6 (ME7.1, 7.1.1, 7.5)', 'fix'],
     ['ME9.0', 'Ford Focus RS mk2, Volvo 2.5T', 'fix'],
     ['EDC15', 'VAG TDI, BMW M47/M57 DDE4', 'fix'],
-    ['EDC16', 'diesel, PowerPC', 'check'],
+    ['EDC16C', 'BMW M57 DDE5 full read (1.5 MB)', 'fix'],
+    ['EDC16', 'other diesel, PowerPC', 'check'],
     ['EDC17', 'diesel, TriCore', 'check'],
 ];
 const form = reactive({ name: '', email: '', password: '', password_confirmation: '', invite_code: '', remember: true });

@@ -9,7 +9,7 @@
         <div v-else-if="!patches" class="grid flex-1 place-items-center font-mono text-[12px] text-muted">Checking patches…</div>
         <div v-else-if="!patches.length" class="max-w-xl p-6 text-[12px] text-muted">
             <p class="text-ink">No code patches for this ECU yet.</p>
-            <p class="mt-1">Supported so far: BMW DDE4 / EDC15C4 multimap (software 1037351632 and 1037351761, full read).</p>
+            <p class="mt-1">Supported so far: multimap for BMW DDE4 / EDC15C4 (software 1037351632 and 1037351761) and BMW DDE5 / EDC16C (software 1037361878), full reads only.</p>
         </div>
 
         <div v-else class="max-w-3xl space-y-3 p-3">
