@@ -89,7 +89,7 @@ class DtcService
                 ...$path->toArray(),
                 'codes' => $codes,
                 'monitorSystems' => $systems,
-                'protected' => $reason !== null,
+                'protected' => false,
                 'protectedReason' => $reason,
             ];
         }
