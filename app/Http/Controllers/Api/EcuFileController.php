@@ -157,12 +157,6 @@ class EcuFileController extends Controller
 
         $dtc = new DtcService;
         $original = $file->bin();
-        $protected = $dtc->protectedChanges($original, $bin, $dtc->table($original, (string) $file->family_id), (string) $file->family_id);
-        if ($protected) {
-            return response()->json([
-                'message' => 'Emissions-related fault paths were changed ('.implode(', ', array_slice($protected, 0, 8)).'). BinBench does not save files with emissions monitoring switched off.',
-            ], 422);
-        }
 
         $analyzer = new Analyzer;
         $fixed = false;
