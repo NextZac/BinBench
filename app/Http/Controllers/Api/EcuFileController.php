@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Ecu\Analyzer;
 use App\Ecu\Bin;
-use App\Ecu\Dtc\DtcService;
 use App\Ecu\Dyno\DynoEstimator;
 use App\Ecu\Export\ExportBlocked;
 use App\Ecu\Export\ExportGate;
@@ -155,18 +154,15 @@ class EcuFileController extends Controller
         }
         $maps = array_map(fn (array $m): MapDef => MapDef::fromArray($m), $file->maps ?? []);
 
-        $dtc = new DtcService;
-        $original = $file->bin();
-
-        $analyzer = new Analyzer;
-        $fixed = false;
-        if ($request->boolean('fix')) {
-            try {
-                $bin = $analyzer->fixChecksums($bin, $file->family_id);
-                $fixed = true;
-            } catch (\Throwable $e) {
-                return response()->json(['message' => 'Checksum correction failed: '.$e->getMessage()], 422);
-            }
+        try {
+            $export = $gate->prepare($original, $modified, (string) $file->family_id, $maps,
+                $request->boolean('fix', true), $request->boolean('acknowledge_unverified'));
+        } catch (ExportBlocked $e) {
+            return response()->json([
+                'message' => $e->reason,
+                'needsAcknowledgement' => true,
+                'checksums' => $e->checksums,
+            ], 422);
         }
 
         $path = 'bins/'.Str::uuid().'.bin';
@@ -303,7 +299,7 @@ class EcuFileController extends Controller
     {
         return [
             ...$file->only(['id', 'name', 'original_filename', 'size', 'sha1', 'family', 'family_id', 'sw', 'ident', 'maps', 'checksums', 'notes', 'created_at']),
-            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'checksums', 'changed_maps', 'created_at']),
+            'versions' => $file->versions()->get(['id', 'label', 'sha1', 'checksum_fixed', 'export_state', 'unverified_reason', 'checksums', 'changed_maps', 'changes', 'created_at']),
             'definitions' => $file->definitions()->map(fn (MapDefinition $d): array => $d->only(['id', 'name', 'source_filename', 'map_count', 'created_at']))->values(),
         ];
     }

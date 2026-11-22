@@ -80,6 +80,9 @@ class EcuFileApiTest extends TestCase
             ->assertJsonPath('changed_maps', ['Boost pressure target'])
             ->json();
         $this->assertNotEmpty($version['unverified_reason']);
+        $this->getJson(route('files.show', $file))
+            ->assertJsonPath('versions.0.export_state', 'unverified')
+            ->assertJsonPath('versions.0.unverified_reason', $version['unverified_reason']);
 
         $download = $this->get(route('files.versions.download', [$file, $version['id']]));
         $download->assertOk();

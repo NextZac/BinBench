@@ -125,6 +125,8 @@ class TuningApiTest extends TestCase
         $versionId = $this->postJson(route('files.versions.store', $file), [
             'file' => UploadedFile::fake()->createWithContent('m.bin', $modified),
             'label' => 'Stage 1',
+            // the synthetic file has no checksum module, so it can only leave as unverified
+            'acknowledge_unverified' => true,
         ])->assertCreated()->json('id');
         $otherId = $this->uploadFile('copy.bin', $file->bin()->data);
 
